@@ -21,7 +21,7 @@ def writeWord {τ} (self : SharedState τ) (addr v : UInt256) : SharedState τ :
 
 def calldatacopy {τ} (self : SharedState τ) (mstart datastart size : UInt256) : SharedState τ :=
   { self with
-    memory := self.executionEnv.inputData.write datastart.toNat self.memory mstart.toNat size.toNat
+    memory := self.executionEnv.calldata.write datastart.toNat self.memory mstart.toNat size.toNat
     activeWords :=
       .ofNat (MachineState.M self.activeWords.toNat mstart.toNat size.toNat)
   }

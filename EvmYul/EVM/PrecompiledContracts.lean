@@ -33,7 +33,7 @@ def Ξ_ECREC
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let d := I.inputData
+    let d := I.calldata
     let h := d.readBytes 0 32
     let v := d.readBytes 32 32
     let r := d.readBytes 64 32
@@ -62,7 +62,7 @@ def Ξ_SHA256
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ :=
-    let l := I.inputData.size
+    let l := I.calldata.size
     let ceil := ( l + 31 ) / 32
     60 + 12 * ceil
 
@@ -70,7 +70,7 @@ def Ξ_SHA256
     (false, ∅, ⟨0⟩, A, .empty)
   else
     let o :=
-      match ffi.SHA256 I.inputData with
+      match ffi.SHA256 I.calldata with
         | .ok s => s
         | .error e =>
           dbg_trace s!"Ξ_SHA56 failed: {e}"
@@ -86,7 +86,7 @@ def Ξ_RIP160
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ :=
-    let l := I.inputData.size
+    let l := I.calldata.size
     let ceil := ( l + 31 ) / 32
     600 + 120 * ceil
 
@@ -94,7 +94,7 @@ def Ξ_RIP160
     (false, ∅, ⟨0⟩, A, .empty)
   else
     let o :=
-      match RIP160 I.inputData with
+      match RIP160 I.calldata with
         | .ok s => s
         | .error e =>
           dbg_trace s!"Ξ_RIP160 failed: {e}"
@@ -110,14 +110,14 @@ def Ξ_ID
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ :=
-    let l := I.inputData.size
+    let l := I.calldata.size
     let ceil := ( l + 31 ) / 32
     15 + 3 * ceil
 
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let o := I.inputData
+    let o := I.calldata
     (true, σ, g - .ofNat gᵣ, A, o)
 
 def nat_of_slice
@@ -147,7 +147,7 @@ def Ξ_EXPMOD
     :
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let data := I.inputData
+  let data := I.calldata
   let base_length := nat_of_slice data 0 32
   let exp_length := nat_of_slice data 32 32
   let modulus_length := nat_of_slice data 64 32
@@ -203,7 +203,7 @@ private def expmodOutput :=
       ⟨3000⟩
       default
       { (default : ExecutionEnv .EVM) with
-        inputData := l_B ++ l_E ++ l_M ++ B ++ E ++ M
+        calldata := l_B ++ l_E ++ l_M ++ B ++ E ++ M
       }
   o
  where
@@ -227,7 +227,7 @@ def Ξ_BN_ADD
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let d := I.inputData
+    let d := I.calldata
     let x := (d.readBytes 0 32, d.readBytes 32 32)
     let y := (d.readBytes 64 32, d.readBytes 96 32)
     let o := BN_ADD x.1 x.2 y.1 y.2
@@ -245,7 +245,7 @@ private def bn_addOutput₀ :=
       ⟨3000⟩
       default
       { (default : ExecutionEnv .EVM) with
-        inputData := x₁ ++ y₁ ++ x₂ ++ y₂
+        calldata := x₁ ++ y₁ ++ x₂ ++ y₂
       }
   o
  where
@@ -261,7 +261,7 @@ private def bn_addOutput₁ :=
       ⟨3000⟩
       default
       { (default : ExecutionEnv .EVM) with
-        inputData := bn_addOutput₀ ++ x ++ y
+        calldata := bn_addOutput₀ ++ x ++ y
       }
   o
  where
@@ -281,7 +281,7 @@ def Ξ_BN_MUL
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let d := I.inputData
+    let d := I.calldata
     let x := (d.readBytes 0 32, d.readBytes 32 32)
     let n := d.readBytes 64 32
     let o := BN_MUL x.1 x.2 n
@@ -299,7 +299,7 @@ private def bn_mulOutput :=
       ⟨100000⟩
       default
       { (default : ExecutionEnv .EVM) with
-        inputData := x₁ ++ y₁ ++ n
+        calldata := x₁ ++ y₁ ++ n
       }
   o
  where
@@ -315,7 +315,7 @@ def Ξ_SNARKV
     :
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let d := I.inputData
+  let d := I.calldata
   let k := d.size / 192
   let gᵣ : ℕ := 34000 * k + 45000
 
@@ -336,7 +336,7 @@ private def snarkvOutput :=
       ⟨100000⟩
       default
       { (default : ExecutionEnv .EVM) with
-        inputData := x ++ y ++ ffi.ByteArray.zeroes ⟨32 * 4⟩
+        calldata := x ++ y ++ ffi.ByteArray.zeroes ⟨32 * 4⟩
       }
   o
  where
@@ -351,7 +351,7 @@ def Ξ_BLAKE2_F
     :
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let d := I.inputData
+  let d := I.calldata
   let gᵣ : ℕ := fromByteArrayBigEndian (d.extract 0 4)
 
   if g.toNat < gᵣ then
@@ -373,7 +373,7 @@ def Ξ_PointEval
     :
   (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let d := I.inputData
+  let d := I.calldata
   let gᵣ : ℕ := 50000
 
   if g.toNat < gᵣ then

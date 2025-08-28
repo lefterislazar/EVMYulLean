@@ -644,7 +644,7 @@ def Lambda
     , sender    := o
     , source    := s
     , weiValue  := v
-    , inputData := default
+    , calldata := default
     , code      := i
     , gasPrice  := p.toNat
     , header    := H
@@ -765,7 +765,7 @@ def Θ (fuel : Nat)
       codeOwner := r        -- Equation (132)
       sender    := o        -- Equation (133)
       gasPrice  := p.toNat  -- Equation (134)
-      inputData := d        -- Equation (135)
+      calldata := d        -- Equation (135)
       source    := s        -- Equation (136)
       weiValue  := v'       -- Equation (137)
       depth     := e        -- Equation (138)

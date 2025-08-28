@@ -11,7 +11,7 @@ The execution envorinment `I` `ExecutionEnv`. Section 9.3.
 - `sender`    `Iₒ`
 - `source`    `Iₛ`
 - `weiValue`  `Iᵥ`
-- `inputData` `I_d`
+- `calldata` `I_d`
 - `code`      `I_b`
 - `gasPrice`  `Iₚ`
 - `header`    `I_H`
@@ -23,7 +23,7 @@ structure ExecutionEnv (τ : OperationType) where
   sender    : AccountAddress
   source    : AccountAddress
   weiValue  : UInt256
-  inputData : ByteArray
+  calldata : ByteArray
   code      : (Yul.Ast.contractCode τ)
   gasPrice  : ℕ
   header    : BlockHeader

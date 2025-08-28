@@ -294,7 +294,7 @@ def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat)
     | τ, .CALLDATALOAD =>
       dispatchUnaryStateOp τ (λ s v ↦ (s, EvmYul.State.calldataload s v))
     | τ, .CALLDATASIZE =>
-      dispatchExecutionEnvOp τ (.ofNat ∘ ByteArray.size ∘ ExecutionEnv.inputData)
+      dispatchExecutionEnvOp τ (.ofNat ∘ ByteArray.size ∘ ExecutionEnv.calldata)
     | τ, .CALLDATACOPY =>
       dispatchTernaryCopyOp τ .calldatacopy
     | .EVM, .CODESIZE =>
