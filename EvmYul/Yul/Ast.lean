@@ -46,13 +46,8 @@ mutual
   -- https://docs.soliditylang.org/en/latest/internals/optimizer.html#forloopinitrewriter
   inductive Stmt where
     | Block : List Stmt → Stmt
-    | Let : List Identifier → Stmt
-    | LetEq : Identifier → Expr → Stmt
-    | LetCall : List Identifier → Expr → Stmt
-    | Assign : Identifier → Expr → Stmt
-    | AssignCall : List Identifier → Expr → Stmt
-    | ExprStmtCall : YulFunctionName → List Expr -> Stmt
-    | ExprStmtPrimCall : PrimOp → List Expr -> Stmt
+    | Let : List Identifier → Option Expr → Stmt
+    | ExprStmtCall : Expr → Stmt
     | Switch : Expr → List (Literal × List Stmt) → List Stmt → Stmt
     | For : Expr → List Stmt → List Stmt → Stmt
     | If : Expr → List Stmt → Stmt

@@ -291,15 +291,15 @@ partial def translateStmt (stmt : TSyntax `stmt) : TermElabM Term :=
     match f' with
       | .inl primOp =>
         let primOp ← translatePrimOp primOp
-        `(Stmt.LetCall [$ids',*] (Expr.Call (Sum.inl $primOp) [$es',*]))
+        `(Stmt.Let [$ids',*] (.some (Expr.Call (Sum.inl $primOp) [$es',*])))
       | .inr _ =>
-        `(Stmt.LetCall [$ids',*] (Expr.Call (Sum.inr $f) [$es',*]))
+        `(Stmt.Let [$ids',*] (.some (Expr.Call (Sum.inr $f) [$es',*])))
 
   -- LetEq
   | `(stmt| let $idn:ident := $init:expr) => do
     let idn' := translateIdent idn
     let expr' ← translateExpr init
-    `(Stmt.LetEq $idn' $expr')
+    `(Stmt.Let [$idn'] (.some $expr'))
 
   -- TODO(fix)
   -- | `(stmt| let $idn:ident := $s:str) => do
@@ -309,7 +309,7 @@ partial def translateStmt (stmt : TSyntax `stmt) : TermElabM Term :=
   -- Let
   | `(stmt| let $ids:ident,*) => do
     let ids' := (ids : TSyntaxArray _).map translateIdent
-    `(Stmt.Let [$ids',*])
+    `(Stmt.Let [$ids',*] .none)
 
   -- AssignCall
   | `(stmt| $ids:ident,* := $f:ident ( $es:expr,* )) => do
@@ -319,15 +319,15 @@ partial def translateStmt (stmt : TSyntax `stmt) : TermElabM Term :=
     match f' with
       | .inl primOp =>
         let primOp ← translatePrimOp primOp
-        `(Stmt.AssignCall [$ids',*] (Expr.Call (Sum.inl $primOp) [$es',*]))
+        `(Stmt.Let [$ids',*] (.some (Expr.Call (Sum.inl $primOp) [$es',*])))
       | .inr _ =>
-        `(Stmt.AssignCall [$ids',*] (Expr.Call (Sum.inr $f) [$es',*]))
+        `(Stmt.Let [$ids',*] (.some (Expr.Call (Sum.inr $f) [$es',*])))
 
   -- Assign
   | `(stmt| $idn:ident := $init:expr) => do
     let idn' := translateIdent idn
     let expr' ← translateExpr init
-    `(Stmt.Assign $idn' $expr')
+    `(Stmt.Let [$idn'] (.some $expr'))
 
   -- ExprStmt
   | `(stmt| $f:ident ( $es:expr,* )) => do
@@ -336,9 +336,9 @@ partial def translateStmt (stmt : TSyntax `stmt) : TermElabM Term :=
     match f' with
       | .inl primOp =>
         let primOp ← translatePrimOp primOp
-        `(Stmt.ExprStmtPrimCall $primOp [$es',*])
+        `(Stmt.ExprStmtCall (Expr.Call (Sum.inl $primOp) [$es',*]))
       | .inr _ =>
-        `(Stmt.ExprStmtCall $f [$es',*])
+        `(Stmt.ExprStmtCall (Expr.Call (Sum.inr $f) [$es',*]))
 
   -- For
   | `(stmt| for {} $cond:expr {$post:stmt*} {$body:stmt*}) => do
@@ -394,14 +394,14 @@ example : << bar >> = Expr.Var "bar" := rfl
 example : << 42 >> = Expr.Lit ⟨42⟩ := rfl
 example : <s break > = Stmt.Break := rfl
 -- example : <s let a, b := f(42) > = Stmt.LetCall ["a", "b"] f [Expr.Lit ⟨42⟩] := rfl -- TODO fix parser and this example
-example : <s let a > = Stmt.Let ["a"] := rfl
-example : <s let a := 5 > = Stmt.LetEq "a" (.Lit ⟨5⟩) := rfl
+example : <s let a > = Stmt.Let ["a"] .none := rfl
+example : <s let a := 5 > = Stmt.Let ["a"] (.some (.Lit ⟨5⟩)) := rfl
 -- example : <s a, b := f(42) > = Stmt.AssignCall ["a", "b"] f [Expr.Lit ⟨42⟩] := rfl -- TODO fix parser and this example
-example : <s a := 42 > = Stmt.Assign "a" (.Lit ⟨42⟩) := rfl
+example : <s a := 42 > = Stmt.Let ["a"] (.some (.Lit ⟨42⟩)) := rfl
 
-example : <s c := add(a, b) > = Stmt.AssignCall ["c"] (Expr.Call (Sum.inl (Operation.StopArith Operation.SAOp.ADD)) [Expr.Var "a", Expr.Var "b"]) := rfl
-example : <s let c := sub(a, b) > = Stmt.LetCall ["c"] (Expr.Call (Sum.inl (Operation.StopArith Operation.SAOp.SUB)) [Expr.Var "a", Expr.Var "b"]) := rfl
-example : <s let a := 5 > = Stmt.LetEq "a" (.Lit ⟨5⟩) := rfl
+example : <s c := add(a, b) > = Stmt.Let ["c"] (.some (Expr.Call (Sum.inl (Operation.StopArith Operation.SAOp.ADD)) [Expr.Var "a", Expr.Var "b"])) := rfl
+example : <s let c := sub(a, b) > = Stmt.Let ["c"] (.some (Expr.Call (Sum.inl (Operation.StopArith Operation.SAOp.SUB)) [Expr.Var "a", Expr.Var "b"])) := rfl
+example : <s let a := 5 > = Stmt.Let ["a"] (.some (.Lit ⟨5⟩)) := rfl
 example : <s {} >
   = Stmt.Block [] := rfl
 example : <s
@@ -461,8 +461,8 @@ example : <s
   default { break }
 > = Stmt.Switch (Expr.Var "a") [(⟨42⟩, [.Continue])] [.Break] := rfl
 
-example : <s let a, b, c > = Stmt.Let ["a", "b", "c"] := rfl
-example : <s revert(0, 0) > = Stmt.ExprStmtPrimCall (.System (.REVERT)) [(Expr.Lit ⟨0⟩), (Expr.Lit ⟨0⟩)] := rfl
+example : <s let a, b, c > = Stmt.Let ["a", "b", "c"] .none := rfl
+example : <s revert(0, 0) > = Stmt.ExprStmtCall (.Call (Sum.inl (.System (.REVERT))) [(Expr.Lit ⟨0⟩), (Expr.Lit ⟨0⟩)]) := rfl
 example : <s if 1 { leave } > = Stmt.If (.Lit ⟨1⟩) [Stmt.Leave] := rfl
 example : <s {
     if 1 { leave }

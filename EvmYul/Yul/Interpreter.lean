@@ -142,24 +142,17 @@ mutual
           let s₁ := exec fuel' stmt s
           exec fuel' (.Block stmts) s₁
 
-        | .Let vars => List.foldr (λ var s ↦ s.insert var ⟨0⟩) s vars
-
-        | .LetEq var rhs =>
-          let (s, val) := eval fuel' rhs s
-          s.insert var val
-
-        | .LetCall vars expr =>
-            match expr with
-            | .Call (Sum.inl prim) args =>
-              execPrimCall prim vars (reverse' (evalArgs fuel' args.reverse s))
-            | .Call (Sum.inr yulFunctionName) args =>
-              execCall fuel' yulFunctionName vars (reverse' (evalArgs fuel' args.reverse s))
-            | .Var identifier => s.insert vars.head! s[identifier]! -- It should be safe to call head! here if the Yul code is parsed correctly.
-            | .Lit literal => s.insert vars.head! literal -- It should be safe to call head! here if the Yul code is parsed correctly.
-
-        | .Assign var rhs => exec fuel' (.LetEq var rhs) s
-
-        | .AssignCall vars expr => exec fuel' (.LetCall vars expr) s
+        | .Let vars exprOption =>
+            match exprOption with
+              | .none =>List.foldr (λ var s ↦ s.insert var ⟨0⟩) s vars
+              | .some expr =>
+                match expr with
+                  | .Call (Sum.inl prim) args =>
+                    execPrimCall prim vars (reverse' (evalArgs fuel' args.reverse s))
+                  | .Call (Sum.inr yulFunctionName) args =>
+                    execCall fuel' yulFunctionName vars (reverse' (evalArgs fuel' args.reverse s))
+                  | .Var identifier => s.insert vars.head! s[identifier]! -- It should be safe to call head! here if the Yul code is parsed correctly.
+                  | .Lit literal => s.insert vars.head! literal -- It should be safe to call head! here if the Yul code is parsed correctly.
 
         | .If cond body =>
           let (s, cond) := eval fuel' cond s
@@ -171,9 +164,11 @@ mutual
         -- (https://docs.soliditylang.org/en/latest/yul.html#restrictions-on-the-grammar)
         --
         -- Thus, we cannot have literals or variables on the RHS.
-        | .ExprStmtCall f args => execCall fuel' f [] (reverse' (evalArgs fuel' args.reverse s))
-        
-        | .ExprStmtPrimCall prim args => execPrimCall prim [] (reverse' (evalArgs fuel' args.reverse s))
+        | .ExprStmtCall expr =>
+             match expr with
+               | .Call (Sum.inl prim) args => execPrimCall prim [] (reverse' (evalArgs fuel' args.reverse s))
+               | .Call (Sum.inr f) args => execCall fuel' f [] (reverse' (evalArgs fuel' args.reverse s))
+               | _ => default -- This case should never occur because we cannot have literals or variables on the RHS, as noted above.
 
         | .Switch cond cases' default' =>
 
