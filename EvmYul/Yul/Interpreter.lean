@@ -63,16 +63,20 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
                     let sharedState₁ := { sharedState with executionEnv := executionEnv₁ }
                     let s₁ : Yul.State := .Ok sharedState₁ default
                     let (s₂, _) := call fuel₁ [] .none s₁
-                    let memory₃ := ByteArray.write s₂.toMachineState.H_return 0 s₂.toMachineState.memory outOffset.toNat outSize.toNat
-                    match s₂ with
-                      | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
-                      | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
-                      | .Ok sharedState₂ _ =>
-                        let sharedState₃ := { sharedState₂ with
-                                                memory := memory₃,
-                                                returnData := s₂.toMachineState.H_return
-                                             }
-                        (.Ok sharedState₃ varstore, [⟨1⟩])
+                    
+                    if outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) > s₂.toMachineState.memory.size
+                    then (default, [⟨0⟩]) -- Out of range of memory
+                    else
+                      let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₂.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
+                      match s₂ with
+                        | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
+                        | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
+                        | .Ok sharedState₂ _ =>
+                          let sharedState₃ := { sharedState₂ with
+                                                  memory := memory₃,
+                                                  returnData := s₂.toMachineState.H_return
+                                              }
+                          (.Ok sharedState₃ varstore, [⟨1⟩])
           | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly
       | _ => step prim .none s₀ args |>.toOption.map (λ (s, lit) ↦ (s, lit.toList)) |>.getD default
 
