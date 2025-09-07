@@ -220,7 +220,7 @@ def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat)
   let _ : Id Unit := -- For debug logging
     match τ with
       | .EVM => dbg_trace op.pretty; pure ()
-      | .Yul => pure ()
+      | .Yul => dbg_trace op.pretty; pure ()
   match τ, op with
     -- TODO: Revisit STOP, this is likely not the best way to do it and the Yul version is WIP.
     | τ, .STOP =>
