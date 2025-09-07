@@ -62,6 +62,7 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
                                           }
                     let sharedState₁ := { sharedState with executionEnv := executionEnv₁ }
                     let s₁ : Yul.State := .Ok sharedState₁ default
+                    
                     let (s₂, _) := call fuel₁ [] .none s₁
                     
                     if outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) > s₂.toMachineState.memory.size
