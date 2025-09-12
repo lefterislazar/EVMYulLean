@@ -43,42 +43,66 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
       | .CALL =>
         match args with
           | _ :: address_arg :: value :: inOffset :: inSize :: outOffset :: outSize :: _ =>
-            let address := AccountAddress.ofUInt256 address_arg
-            let calldata₁ := s₀.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
-            let accountMap₁ := (s₀.sharedState.accountMap.transferBalance .Yul s₀.executionEnv.codeOwner address value)
-            match accountMap₁ with
-              | .none => (s₀, [⟨0⟩]) -- Insufficient funds, revert and return 0 to indicate error
-              | .some _ =>
+            if ¬s₀.executionEnv.perm ∧ value ≠ ⟨0⟩
+            then default -- TODO: Better to raise a Yul.Exception here and handle the situation correctly elsewhere.
+            else 
+              let address := AccountAddress.ofUInt256 address_arg
+              let calldata₁ := s₀.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
+              let accountMap₁ := (s₀.sharedState.accountMap.transferBalance .Yul s₀.executionEnv.codeOwner address value)
+              if s₀.toSharedState.executionEnv.depth ≥ 1024 || accountMap₁ == .none
+              then
+                match s₀ with
+                  | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
+                  | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
+                  | .Ok sharedState₀ varstore =>
+                    let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty }
+                    (.Ok sharedState₁ varstore, [⟨0⟩])  -- Insufficient funds or reached depth limit: return 0 to indicate error, with empty return data 
+              else
                 match s₀ with
                 | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
                 | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
                 | .Ok sharedState varstore =>
-                    let executionEnv₁ := { sharedState.executionEnv with
-                                              calldata := calldata₁,
-                                              code := (s₀.sharedState.accountMap.findD address default).code,
-                                              codeOwner := address,
-                                              source := s₀.executionEnv.codeOwner,
-                                              weiValue := value
-                                          }
-                    let sharedState₁ := { sharedState with executionEnv := executionEnv₁ }
-                    let s₁ : Yul.State := .Ok sharedState₁ default
-                    
-                    let (s₂, _) := call fuel₁ [] .none s₁
-                    
-                    if outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) > s₂.toMachineState.memory.size
-                    then (default, [⟨0⟩]) -- Out of range of memory
-                    else
-                      let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₂.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
-                      match s₂ with
-                        | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
-                        | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
-                        | .Ok sharedState₂ _ =>
-                          let sharedState₃ := { sharedState₂ with
-                                                  memory := memory₃,
-                                                  returnData := s₂.toMachineState.H_return
+                    match s₀.sharedState.accountMap.find? address with
+                      | .none => 
+                        match s₀ with
+                          | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
+                          | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
+                          | .Ok sharedState₀ varstore =>
+                            let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty }
+                            (.Ok sharedState₁ varstore, [⟨1⟩])  -- No contract at the provided address, return 1 to indicate success, with empty return data. (Like STOP opcode).
+                      | .some yulContract =>
+                        let executionEnv₁ := { sharedState.executionEnv with
+                                                  calldata := calldata₁,
+                                                  code := yulContract.code,
+                                                  codeOwner := address,
+                                                  source := s₀.executionEnv.codeOwner,
+                                                  weiValue := value
+                                                  depth := s₀.toSharedState.executionEnv.depth + 1
                                               }
-                          (.Ok sharedState₃ varstore, [⟨1⟩])
-          | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly
+                        let sharedState₁ := { sharedState with executionEnv := executionEnv₁ } -- memory should be reset for .CALL but left for .STATICCALL
+                        let s₁ : Yul.State := .Ok sharedState₁ default
+                        
+                        let (s₂, _) := call fuel₁ [] .none s₁
+                        
+                        /- We note here that if:
+                              `outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) ≥ UInt256.size`
+                            then we are writing beyond the theoretical memory size limit.
+                            The yellow paper is unclear on the semantics of this (at the time of writing).
+                            We follow the https://github.com/NethermindEth/nethermind execution client (for example).
+                            And we expand the memory beyond the theoretical 2^256 bit max size if needed.
+                            In practice, this is essentially impossible to occur due to the
+                              prohibitively large gas cost of allocating this much memory. -/
+                        let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₂.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
+                        match s₂ with
+                          | .OutOfFuel => (.OutOfFuel, [⟨0⟩])
+                          | .Checkpoint j => (.Checkpoint j, [⟨0⟩])
+                          | .Ok sharedState₂ _ =>
+                            let sharedState₃ := { sharedState₂ with
+                                                    memory := memory₃,
+                                                    returnData := s₂.toMachineState.H_return
+                                                }
+                            (.Ok sharedState₃ varstore, [⟨1⟩])
+          | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
       | _ => step prim .none s₀ args |>.toOption.map (λ (s, lit) ↦ (s, lit.toList)) |>.getD default
 
   def evalTail (fuel : Nat) (args : List Expr) : Yul.State × Literal → Yul.State × List Literal
@@ -106,9 +130,10 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
     match fuel with
       | 0 => (.OutOfFuel, default)
       | .succ fuel' =>
-        -- This should never return `default` if the state is set up correctly.
+        -- This should never return `default`, since `primCall` checks if the address is in the `accountMap` before calling `call`, and other situations should not result in returning `default` if the state is set up correctly
+        -- TODO: double check the above
         let yulContract := (s.sharedState.accountMap.findD s.toSharedState.executionEnv.codeOwner default).code
-        -- This should never return `default` if the state is set up correctly.
+        -- This should never return `default` if the state is set up correctly. Guaranteed by the compiler.
         let f := match yulFunctionNameOption with
                    | .none => FunctionDefinition.Def [] [] [yulContract.dispatcher]
                    | .some yulFunctionName =>
