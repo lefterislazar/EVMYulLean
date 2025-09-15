@@ -82,7 +82,7 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
                         let sharedState₁ := { sharedState with executionEnv := executionEnv₁ } -- memory should be reset for .CALL but left for .STATICCALL
                         let s₁ : Yul.State := .Ok sharedState₁ default
                         
-                        let (s₂, _) := call fuel₁ [] .none s₁
+                        let (s₂, _) := callFromCode fuel₁ [] .none s₁
                         
                         /- We note here that if:
                               `outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) ≥ UInt256.size`
@@ -125,6 +125,8 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
 
   /--
     `call` executes a call of a user-defined function.
+    
+    Intended for use when a contract is calling one of its own functions, rather than an external contract.
   -/
   def call (fuel : Nat) (args : List Literal) (yulFunctionNameOption : Option YulFunctionName) (s : Yul.State) : Yul.State × List Literal :=
     match fuel with
@@ -138,6 +140,25 @@ def primCall (fuel : ℕ) (s₀ : Yul.State) (prim : Operation .Yul) (args : Lis
                    | .none => FunctionDefinition.Def [] [] [yulContract.dispatcher]
                    | .some yulFunctionName =>
                       ((yulContract.functions.lookup yulFunctionName) |>.getD default)
+        let s₁ := 👌 s.initcall f.params args
+        let s₂ := exec fuel' (.Block f.body) s₁
+        let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
+    (s₃, List.map s₂.lookup! f.rets)
+
+  /--
+    `callFromCode` executes a call of a user-defined function, running `executionEnv.code` rather than the code from `s.toSharedState.executionEnv.codeOwner`.
+    
+    Intended for use when calling an external contract.
+  -/
+  def callFromCode (fuel : Nat) (args : List Literal) (yulFunctionNameOption : Option YulFunctionName) (s : Yul.State) : Yul.State × List Literal :=
+    match fuel with
+      | 0 => (.OutOfFuel, default)
+      | .succ fuel' =>
+        -- This should never return `default` if the state is set up correctly. Guaranteed by the compiler.
+        let f := match yulFunctionNameOption with
+                   | .none => FunctionDefinition.Def [] [] [s.executionEnv.code.dispatcher]
+                   | .some yulFunctionName =>
+                      ((s.executionEnv.code.functions.lookup yulFunctionName) |>.getD default)
         let s₁ := 👌 s.initcall f.params args
         let s₂ := exec fuel' (.Block f.body) s₁
         let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
