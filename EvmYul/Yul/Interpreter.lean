@@ -9,6 +9,8 @@ import EvmYul.Yul.Exception
 
 import EvmYul.Semantics
 
+set_option maxHeartbeats 400000 -- Needs more than 200000
+
 namespace EvmYul
 
 namespace Yul
