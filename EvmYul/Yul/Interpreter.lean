@@ -63,7 +63,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
         match args with
           | _ :: address_arg :: value :: inOffset :: inSize :: outOffset :: outSize :: _ =>
             if ¬s₀.executionEnv.perm ∧ value ≠ ⟨0⟩
-            then default -- TODO: Better to raise a Yul.Exception here and handle the situation correctly elsewhere.
+            then .error .StaticModeViolation
             else 
               let address := AccountAddress.ofUInt256 address_arg
               let calldata₁ := s₀.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
@@ -136,13 +136,13 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                           returnData := s₂.toMachineState.H_return
                                                       }
                                   .ok (.Ok sharedState₃ varstore, [⟨1⟩])
-          | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
+          | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
       | .STATICCALL =>
         match args with
           | _ :: address_arg :: value :: inOffset :: inSize :: outOffset :: outSize :: _ =>
                 let s₀Static : State := setStatic s₀ false
                 if ¬s₀Static.executionEnv.perm ∧ value ≠ ⟨0⟩
-                then default -- TODO: Better to raise a Yul.Exception here and handle the situation correctly elsewhere.
+                then .error .StaticModeViolation
                 else 
                   let address := AccountAddress.ofUInt256 address_arg
                   let calldata₁ := s₀Static.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
@@ -215,12 +215,12 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                               returnData := s₂.toMachineState.H_return
                                                           }
                                       .ok (setStatic (.Ok sharedState₃ varstore) s₀.toSharedState.executionEnv.perm, [⟨1⟩])
-          | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
+          | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
       | .CALLCODE =>
         match args with
           | _ :: address_arg :: value :: inOffset :: inSize :: outOffset :: outSize :: _ =>
             if ¬s₀.executionEnv.perm ∧ value ≠ ⟨0⟩
-            then default -- TODO: Better to raise a Yul.Exception here and handle the situation correctly elsewhere.
+            then .error .StaticModeViolation
             else 
               let address := AccountAddress.ofUInt256 address_arg
               let calldata₁ := s₀.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
@@ -290,7 +290,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                           returnData := s₂.toMachineState.H_return
                                                       }
                                   .ok (.Ok sharedState₃ varstore, [⟨1⟩])
-          | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
+          | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
       | .DELEGATECALL =>
         match args with
           | _ :: address_arg :: inOffset :: inSize :: outOffset :: outSize :: _ =>
@@ -349,7 +349,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                       returnData := s₂.toMachineState.H_return
                                                   }
                               .ok (.Ok sharedState₃ varstore, [⟨1⟩])
-          | _ => default -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
+          | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
       | _ => match step prim .none s₀ args with
               | .ok (s, lit) => .ok (s, lit.toList)
               | .error e => .error e
@@ -382,20 +382,23 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
     match fuel with
       | 0 => .error .OutOfFuel
       | .succ fuel' =>
-        -- This should never return `default`, since `primCall` checks if the address is in the `accountMap` before calling `call`, and other situations should not result in returning `default` if the state is set up correctly
-        -- TODO: double check the above
-        let yulContract := (s.sharedState.accountMap.findD s.toSharedState.executionEnv.codeOwner default).code
-        -- This should never return `default` if the state is set up correctly. Guaranteed by the compiler.
-        let f := match yulFunctionNameOption with
-                   | .none => FunctionDefinition.Def [] [] [yulContract.dispatcher]
-                   | .some yulFunctionName =>
-                      ((yulContract.functions.lookup yulFunctionName) |>.getD default)
-        let s₁ := 👌 s.initcall f.params args
-        match exec fuel' (.Block f.body) s₁ with
-          | .error e => .error e
-          | .ok s₂ =>
-            let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
-            .ok (s₃, List.map s₂.lookup! f.rets)
+        match s.sharedState.accountMap.find? s.toSharedState.executionEnv.codeOwner with
+        | .none => .error .MissingContract
+        | .some yulContract =>
+          let fOpt : Option FunctionDefinition :=
+            match yulFunctionNameOption with
+              | .none => .some (FunctionDefinition.Def [] [] [yulContract.code.dispatcher])
+              | .some yulFunctionName =>
+                  yulContract.code.functions.lookup yulFunctionName
+          match fOpt with
+          | .none => .error .MissingContractFunction
+          | .some f =>
+            let s₁ := 👌 s.initcall f.params args
+            match exec fuel' (.Block f.body) s₁ with
+              | .error e => .error e
+              | .ok s₂ =>
+                let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
+                .ok (s₃, List.map s₂.lookup! f.rets)
 
   /--
     `callFromCode` executes a call of a user-defined function, running `executionEnv.code` rather than the code from `s.toSharedState.executionEnv.codeOwner`.
@@ -406,17 +409,20 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
     match fuel with
       | 0 => .error .OutOfFuel
       | .succ fuel' =>
-        -- This should never return `default` if the state is set up correctly. Guaranteed by the compiler.
-        let f := match yulFunctionNameOption with
-                   | .none => FunctionDefinition.Def [] [] [s.executionEnv.code.dispatcher]
-                   | .some yulFunctionName =>
-                      ((s.executionEnv.code.functions.lookup yulFunctionName) |>.getD default)
-        let s₁ := 👌 s.initcall f.params args
-        match exec fuel' (.Block f.body) s₁ with
-        | .error e => .error e
-        | .ok s₂ =>
-          let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
-          .ok (s₃, List.map s₂.lookup! f.rets)
+          let fOpt : Option FunctionDefinition :=
+            match yulFunctionNameOption with
+              | .none => .some (FunctionDefinition.Def [] [] [s.executionEnv.code.dispatcher])
+              | .some yulFunctionName =>
+                  s.executionEnv.code.functions.lookup yulFunctionName
+          match fOpt with
+          | .none => .error .MissingContractFunction
+          | .some f =>
+            let s₁ := 👌 s.initcall f.params args
+            match exec fuel' (.Block f.body) s₁ with
+            | .error e => .error e
+            | .ok s₂ =>
+              let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
+              .ok (s₃, List.map s₂.lookup! f.rets)
 
   -- Safe to call `List.head!` on return values, because the compiler throws an
   -- error when coarity is > 0 in (1) and when coarity is > 1 in all other
@@ -529,7 +535,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
              match expr with
                | .Call (Sum.inl prim) args => execPrimCall fuel' prim [] (reverse' (evalArgs fuel' args.reverse s))
                | .Call (Sum.inr f) args => execCall fuel' f [] (reverse' (evalArgs fuel' args.reverse s))
-               | _ => default -- This case should never occur because we cannot have literals or variables on the RHS, as noted above.
+               | _ => .error .InvalidExpression -- This case should never occur because we cannot have literals or variables on the RHS, as noted above.
 
         | .Switch cond cases' default' =>
           match eval fuel' cond s with
@@ -583,8 +589,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                       | .ok s₅ =>
                         let s₆ := s₅✏️⟦s⟧?
                         .ok s₆
-
 end
+
+def execTopLevel (fuel : Nat) (stmt : Stmt) (s : State) : State :=
+  match exec fuel stmt s with
+    | .error .InvalidArguments => default
+    | .error .NotEncodableRLP => default
+    | .error .InvalidInstruction => default
+    | .error .OutOfFuel => default
+    | .error .StaticModeViolation => s -- Revert, note that we do not model charging gas in the Yul semantics
+    | .error .MissingContract => default
+    | .error .MissingContractFunction => default -- We do not model fallback functions
+    | .error .InvalidExpression => default
+    | .ok s => s
 
 notation "🍄" => exec
 notation "🌸" => eval
