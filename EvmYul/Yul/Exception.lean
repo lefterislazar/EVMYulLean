@@ -13,6 +13,19 @@ inductive Exception where
   | InvalidExpression       : Exception
   -- | StopInvoked        : Exception
 
+instance : Repr Exception where
+  reprPrec s _ :=
+    match s with
+      | .InvalidArguments => "InvalidArguments"
+      | .NotEncodableRLP => "NotEncodableRLP"
+      | .InvalidInstruction => "InvalidInstruction"
+      | .OutOfFuel => "OutOfFuel"
+      | .StaticModeViolation => "StaticModeViolation"
+      | .MissingContract => "MissingContract"
+      | .MissingContractFunction => "MissingContractFunction"
+      | .InvalidExpression => "InvalidExpression"
+
+
 end Yul
 
 end EvmYul
