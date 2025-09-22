@@ -305,6 +305,8 @@ def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat)
       dispatchExecutionEnvOp τ (.ofNat ∘ ExecutionEnv.gasPrice)
     | .EVM, .EXTCODESIZE =>
       dispatchUnaryStateOp .EVM EvmYul.State.extCodeSize
+    | .Yul, .EXTCODESIZE =>
+      λ _ _ ↦ .error .YulEXTCODESIZENotImplemented
     | .EVM, .EXTCODECOPY =>
       dispatchQuaternaryCopyOp .EVM EvmYul.SharedState.extCodeCopy'
     | τ, .RETURNDATASIZE =>
