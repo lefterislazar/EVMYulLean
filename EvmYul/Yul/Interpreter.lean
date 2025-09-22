@@ -137,7 +137,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                   let sharedState₃ := { sharedState₂ with
                                                           memory := memory₃,
                                                           returnData := s₂.toMachineState.H_return,
-                                                          executionEnv := executionEnv₃
+                                                          executionEnv := executionEnv₃,
+                                                          H_return := ByteArray.empty
                                                       }
                                   .ok (.Ok sharedState₃ varstore, [⟨1⟩])
                             | .error e => .error e
@@ -168,6 +169,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                   let sharedState₃ := { sharedState₂ with
                                                           memory := memory₃,
                                                           returnData := s₂.toMachineState.H_return,
+                                                          H_return := ByteArray.empty,
                                                           executionEnv := executionEnv₃
                                                       }
                                   .ok (.Ok sharedState₃ varstore, [⟨1⟩])
@@ -240,6 +242,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                     let sharedState₃ := { sharedState₂ with
                                                             memory := memory₃,
                                                             returnData := s₂.toMachineState.H_return,
+                                                            H_return := ByteArray.empty
                                                         }
                                     .ok (setStatic (.Ok sharedState₃ varstore) s₀.toSharedState.executionEnv.perm, [⟨1⟩])
           | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
@@ -320,7 +323,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                 | .Ok sharedState₂ _ =>
                                   let sharedState₃ := { sharedState₂ with
                                                           memory := memory₃,
-                                                          returnData := s₂.toMachineState.H_return
+                                                          returnData := s₂.toMachineState.H_return,
+                                                          H_return := ByteArray.empty
                                                       }
                                   .ok (.Ok sharedState₃ varstore, [⟨1⟩])
           | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
@@ -382,7 +386,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                             | .Ok sharedState₂ _ =>
                               let sharedState₃ := { sharedState₂ with
                                                       memory := memory₃,
-                                                      returnData := s₂.toMachineState.H_return
+                                                      returnData := s₂.toMachineState.H_return,
+                                                      H_return := ByteArray.empty
                                                   }
                               .ok (.Ok sharedState₃ varstore, [⟨1⟩])
           | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
