@@ -312,7 +312,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                   And we expand the memory beyond the theoretical 2^256 bit max size if needed.
                                   In practice, this is essentially impossible to occur due to the
                                     prohibitively large gas cost of allocating this much memory. -/
-                              let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₂.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
+                              let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₀.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
                               match s₂ with
                                 | .OutOfFuel => .error .OutOfFuel
                                 | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
@@ -373,7 +373,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                               And we expand the memory beyond the theoretical 2^256 bit max size if needed.
                               In practice, this is essentially impossible to occur due to the
                                 prohibitively large gas cost of allocating this much memory. -/
-                          let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₂.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
+                          let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₀.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
                           match s₂ with
                             | .OutOfFuel => .error .OutOfFuel
                             | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
