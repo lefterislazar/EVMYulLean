@@ -113,7 +113,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                   }
                             let sharedState₁ := { sharedState with
                                                     executionEnv := executionEnv₁,
-                                                    memory := default,
+                                                    memory := ByteArray.mk #[],
                                                     accountMap := accountMap₁
                                                 }
                             let s₁ : State := .Ok sharedState₁ default
@@ -216,7 +216,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                     }
                               let sharedState₁ := { sharedState with
                                                       executionEnv := executionEnv₁,
-                                                      memory := default,
+                                                      memory := ByteArray.mk #[],
                                                   }
                               let s₁ : State := .Ok sharedState₁ default
                               
@@ -297,6 +297,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                   }
                             let sharedState₁ := { sharedState with
                                                     executionEnv := executionEnv₁,
+                                                    memory := ByteArray.mk #[],
                                                     accountMap := accountMap₁
                                                 }
                             let s₁ : State := .Ok sharedState₁ default
@@ -358,7 +359,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                   depth := s₀.toSharedState.executionEnv.depth + 1
                                               }
                         let sharedState₁ := { sharedState with
-                                                executionEnv := executionEnv₁
+                                                executionEnv := executionEnv₁,
+                                                memory := ByteArray.mk #[]
                                             }
                         let s₁ : State := .Ok sharedState₁ default
                         
