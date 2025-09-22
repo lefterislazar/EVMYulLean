@@ -215,9 +215,9 @@ dispatcher :=
                 mstore(64, 0x80)
                 if iszero(lt(calldatasize(), 4))
                 {
-                    if eq(0xf0bc142f, shr(224, calldataload(0)))
+                    if eq(0x5ec1cee6, shr(224, calldataload(0)))
                     {
-                        external_fun_testStoreAndRetreiveExternal()
+                        external_fun_testStoreAndRetrieveExternal()
                     }
                 }
                 revert_error_42b3090547df1d2001c96683413b8cf91c1b902ef5e3cb8d9f6f304cf7446f74()
@@ -274,16 +274,16 @@ functions := (∅ : Finmap (fun (_ : YulFunctionName) ↦ Yul.Ast.FunctionDefini
            >
 
           |>.insert
-          "external_fun_testStoreAndRetreiveExternal"
+          "external_fun_testStoreAndRetrieveExternal"
           <f
-          function external_fun_testStoreAndRetreiveExternal()
+          function external_fun_testStoreAndRetrieveExternal()
             {
                 if callvalue()
                 {
                     revert_error_ca66f745a3ce8ff40e2ccaf1ad45db7774001b90d25810abd9040049be7bf4bb()
                 }
                 let _1 := abi_decode_tuple_uint256(4, calldatasize())
-                fun_testStoreAndRetreiveExternal(_1)
+                fun_testStoreAndRetrieveExternal(_1)
                 return(0, 0)
             }
             
@@ -424,9 +424,9 @@ functions := (∅ : Finmap (fun (_ : YulFunctionName) ↦ Yul.Ast.FunctionDefini
            >
 
           |>.insert
-          "fun_testStoreAndRetreiveExternal"
+          "fun_testStoreAndRetrieveExternal"
           <f
-          function fun_testStoreAndRetreiveExternal(var_v)
+          function fun_testStoreAndRetrieveExternal(var_v)
             {
                 let _1 := 1
                 if iszero(_1)
@@ -510,7 +510,7 @@ functions := (∅ : Finmap (fun (_ : YulFunctionName) ↦ Yul.Ast.FunctionDefini
   Yul.State.Ok sharedState ∅
     
 def test₁ :=
-  let expr : Expr := .Call (Sum.inr "fun_testStoreAndRetreiveExternal") [.Lit ⟨42⟩]
+  let expr : Expr := .Call (Sum.inr "fun_testStoreAndRetrieveExternal") [.Lit ⟨42⟩]
   match (exec 99 (.ExprStmtCall expr) stateEg₁) with
   | .error e => repr e
   | .ok s => s!"{s.toSharedState.accountMap.toList.map (fun (a : AccountAddress × Account .Yul) => repr a.1 ++ " " ++ repr a.2.storage.toList)}"
