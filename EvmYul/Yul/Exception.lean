@@ -3,14 +3,7 @@ namespace EvmYul
 namespace Yul
 
 inductive Exception where
-  | InvalidArguments        : Exception
-  | NotEncodableRLP         : Exception
-  | InvalidInstruction      : Exception
-  | OutOfFuel               : Exception
-  | StaticModeViolation     : Exception
-  | MissingContract         : Exception
-  | MissingContractFunction : Exception
-  | InvalidExpression       : Exception
+  | YulHalt (state : Yul.State) (value : UInt256) : Exception
   -- | StopInvoked        : Exception
 
 instance : Repr Exception where
@@ -24,6 +17,7 @@ instance : Repr Exception where
       | .MissingContract => "MissingContract"
       | .MissingContractFunction => "MissingContractFunction"
       | .InvalidExpression => "InvalidExpression"
+      | .YulHalt _ _ => "YulHalt: (holds a state and a value)"
 
 
 end Yul

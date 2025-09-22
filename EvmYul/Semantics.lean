@@ -380,7 +380,11 @@ def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat)
     | τ, .LOG2 => dispatchLog2 τ
     | τ, .LOG3 => dispatchLog3 τ
     | τ, .LOG4 => dispatchLog4 τ
-    | τ, .RETURN => dispatchBinaryMachineStateOp τ MachineState.evmReturn
+    | .EVM, .RETURN => dispatchBinaryMachineStateOp .EVM MachineState.evmReturn
+    | .Yul, .RETURN => λ yulState lits ↦ 
+        match (dispatchBinaryMachineStateOp .Yul MachineState.evmReturn) yulState lits with
+          | .error e => .error e
+          | .ok (s, v) => .error (Yul.Exception.YulHalt s (v.getD ⟨1⟩))
     | τ, .REVERT => dispatchBinaryMachineStateOp τ MachineState.evmRevert
     | .EVM, .SELFDESTRUCT =>
       λ evmState ↦

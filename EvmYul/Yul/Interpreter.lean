@@ -115,6 +115,27 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                             let s₁ : State := .Ok sharedState₁ default
                             
                             match callFromCode fuel₁ [] .none s₁ with
+                            | .error (.YulHalt s₂ _) => 
+                              let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₀.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
+                              match s₂ with
+                                | .OutOfFuel => .error .OutOfFuel
+                                | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
+                                | .Ok sharedState₂ _ =>
+                                
+                                  -- Restore ExecutionEnv
+                                  let executionEnv₃ := { sharedState₂.executionEnv with
+                                                      calldata := default,
+                                                      code := s₀.toSharedState.executionEnv.code,
+                                                      codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                      source := s₀.executionEnv.source,
+                                                      weiValue := s₀.executionEnv.weiValue,
+                                                  }
+                                  let sharedState₃ := { sharedState₂ with
+                                                          memory := memory₃,
+                                                          returnData := s₂.toMachineState.H_return,
+                                                          executionEnv := executionEnv₃
+                                                      }
+                                  .ok (.Ok sharedState₃ varstore, [⟨1⟩])
                             | .error e => .error e
                             | .ok (s₂, _) =>
                               
@@ -453,19 +474,24 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
   /--
     `execSwitchCases` executes each case of a `switch` statement.
   -/
-  def execSwitchCases (fuel : Nat) (s : State) : List (Literal × List Stmt) → Except Yul.Exception (List (Literal × State))
+  def execSwitchCases (fuel : Nat) (s : State) : List (Literal × List Stmt) → Except Yul.Exception (List (Literal × (Except Yul.Exception State)))
     | [] => .ok []
     | ((val, stmts) :: cases') =>
       match fuel with
       | 0 => .error .OutOfFuel
       | .succ fuel' => 
         match exec fuel' (.Block stmts) s with
+          | .error (.YulHalt s₂ v) =>
+            match execSwitchCases fuel' s cases' with
+            | .error e => .error e
+            | .ok s₃ =>
+              .ok ((val, .error (.YulHalt s₂ v)) :: s₃)
           | .error e => .error e
           | .ok s₂ =>
             match execSwitchCases fuel' s cases' with
             | .error e => .error e
             | .ok s₃ =>
-              .ok ((val, s₂) :: s₃)
+              .ok ((val, .ok s₂) :: s₃)
 
   /--
     `eval` evaluates an expression.
@@ -547,7 +573,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                 match exec fuel' (.Block default') s₁ with
                 | .error e => .error e
                 | .ok s₂ =>
-                  .ok (List.foldr (λ (valᵢ, sᵢ) s ↦ if valᵢ = cond then sᵢ else s) s₂ branches)
+                  (List.foldr (λ (valᵢ, sᵢ) s ↦ if valᵢ = cond then sᵢ else s) (.ok s₂) branches)
 
         -- A `Break` or `Continue` in the pre or post is a compiler error,
         -- so we assume it can't happen and don't modify the state in these
@@ -601,6 +627,7 @@ def execTopLevel (fuel : Nat) (stmt : Stmt) (s : State) : State :=
     | .error .MissingContract => default
     | .error .MissingContractFunction => default -- We do not model fallback functions
     | .error .InvalidExpression => default
+    | .error (.YulHalt s _) => s
     | .ok s => s
 
 notation "🍄" => exec
