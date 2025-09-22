@@ -404,7 +404,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
       | 0 => .error .OutOfFuel
       | .succ fuel' =>
         match s.sharedState.accountMap.find? s.toSharedState.executionEnv.codeOwner with
-        | .none => .error .MissingContract
+        | .none => .error (.MissingContract (s!"{s.toSharedState.executionEnv.codeOwner}")) 
         | .some yulContract =>
           let fOpt : Option FunctionDefinition :=
             match yulFunctionNameOption with
@@ -412,7 +412,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
               | .some yulFunctionName =>
                   yulContract.code.functions.lookup yulFunctionName
           match fOpt with
-          | .none => .error .MissingContractFunction
+          | .none => .error (.MissingContractFunction (yulFunctionNameOption.getD ".none"))
           | .some f =>
             let s₁ := 👌 s.initcall f.params args
             match exec fuel' (.Block f.body) s₁ with
@@ -436,7 +436,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
               | .some yulFunctionName =>
                   s.executionEnv.code.functions.lookup yulFunctionName
           match fOpt with
-          | .none => .error .MissingContractFunction
+          | .none => .error (.MissingContractFunction (yulFunctionNameOption.getD ".none"))
           | .some f =>
             let s₁ := 👌 s.initcall f.params args
             match exec fuel' (.Block f.body) s₁ with
@@ -624,9 +624,10 @@ def execTopLevel (fuel : Nat) (stmt : Stmt) (s : State) : State :=
     | .error .InvalidInstruction => default
     | .error .OutOfFuel => default
     | .error .StaticModeViolation => s -- Revert, note that we do not model charging gas in the Yul semantics
-    | .error .MissingContract => default
-    | .error .MissingContractFunction => default -- We do not model fallback functions
+    | .error (.MissingContract _) => default
+    | .error (.MissingContractFunction _) => default -- We do not model fallback functions
     | .error .InvalidExpression => default
+    | .error .YulEXTCODESIZENotImplemented => default
     | .error (.YulHalt s _) => s
     | .ok s => s
 
