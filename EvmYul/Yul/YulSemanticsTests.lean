@@ -428,7 +428,7 @@ functions := (∅ : Finmap (fun (_ : YulFunctionName) ↦ Yul.Ast.FunctionDefini
           <f
           function fun_testStoreAndRetreiveExternal(var_v)
             {
-                let _1 := extcodesize( 2)
+                let _1 := 1
                 if iszero(_1)
                 {
                     revert_error_0cc013b6b3b6beabea4e3a74a6d380f0df81852ca99887912475e1f66b2a2c20()
