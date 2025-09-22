@@ -1,3 +1,5 @@
+import EvmYul.Yul.State
+
 namespace EvmYul
 
 namespace Yul
