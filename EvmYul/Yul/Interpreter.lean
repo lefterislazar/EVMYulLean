@@ -96,7 +96,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                               | .OutOfFuel => .error .OutOfFuel
                               | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                               | .Ok sharedState₀ varstore =>
-                                let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty }
+                                let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty
+                                                                       accountMap := accountMap₁ }
                                 .ok (.Ok sharedState₁ varstore, [⟨1⟩])  -- No contract at the provided address, return 1 to indicate success, with empty return data. (Like STOP opcode).
                           | .some yulContract =>
                             let executionEnv₁ := { sharedState.executionEnv with
@@ -261,7 +262,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                       | .OutOfFuel => .error .OutOfFuel
                       | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                       | .Ok sharedState₀ varstore =>
-                        let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty }
+                        let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty,
+                                                               accountMap := accountMap₁ }
                         .ok (.Ok sharedState₁ varstore, [⟨0⟩]) -- Reached depth limit: return 0 to indicate error, with empty return data 
                   else
                     match s₀ with
@@ -274,7 +276,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                               | .OutOfFuel => .error .OutOfFuel
                               | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                               | .Ok sharedState₀ varstore =>
-                                let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty }
+                                let sharedState₁ := {sharedState₀ with H_return := ByteArray.empty,
+                                                                       accountMap := accountMap₁ }
                                 .ok (.Ok sharedState₁ varstore, [⟨1⟩])  -- No contract at the provided address, return 1 to indicate success, with empty return data. (Like STOP opcode).
                           | .some yulContract =>
                             let executionEnv₁ := { sharedState.executionEnv with
