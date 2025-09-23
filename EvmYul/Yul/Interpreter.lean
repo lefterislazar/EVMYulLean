@@ -185,7 +185,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                       | .none => 
                           buildContractCallEmptyReturnState s₀Static .none ⟨1⟩ -- No contract at the provided address, return 1 to indicate success, with empty return data. (Like STOP opcode).
                       | .some yulContract =>
-                        let executionEnv₁ := { sharedState.executionEnv with
+                        let executionEnv₁ := { s₀Static.executionEnv with
                                                   calldata := calldata₁,
                                                   code := yulContract.code,
                                                   codeOwner := address,
