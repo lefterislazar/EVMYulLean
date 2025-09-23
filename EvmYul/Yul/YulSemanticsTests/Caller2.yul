@@ -1,32 +1,32 @@
 Optimized IR:
 /// @use-src 0:"Caller2.sol"
-object "CallerContract_117" {
+object "CallerContract_120" {
     code {
         {
-            /// @src 0:151:1235  "contract CallerContract {..."
+            /// @src 0:151:1255  "contract CallerContract {..."
             mstore(64, memoryguard(0x80))
             if callvalue()
             {
                 revert_error_ca66f745a3ce8ff40e2ccaf1ad45db7774001b90d25810abd9040049be7bf4bb()
             }
             let _1 := mload(64)
-            let _2 := datasize("CallerContract_117_deployed")
-            codecopy(_1, dataoffset("CallerContract_117_deployed"), _2)
+            let _2 := datasize("CallerContract_120_deployed")
+            codecopy(_1, dataoffset("CallerContract_120_deployed"), _2)
             return(_1, _2)
         }
         function revert_error_ca66f745a3ce8ff40e2ccaf1ad45db7774001b90d25810abd9040049be7bf4bb()
         { revert(0, 0) }
     }
     /// @use-src 0:"Caller2.sol"
-    object "CallerContract_117_deployed" {
+    object "CallerContract_120_deployed" {
         code {
             {
-                /// @src 0:151:1235  "contract CallerContract {..."
+                /// @src 0:151:1255  "contract CallerContract {..."
                 mstore(64, memoryguard(0x80))
                 if iszero(lt(calldatasize(), 4))
                 {
                     switch shr(224, calldataload(0))
-                    case 0x1690409e {
+                    case 0x37cbaee8 {
                         external_fun_testStaticStore()
                     }
                     case 0x5ec1cee6 {
@@ -42,32 +42,6 @@ object "CallerContract_117" {
             { revert(0, 0) }
             function revert_error_dbdddcbe895c83990c08b3492a0e83918d802a52331272ac6fdb6a7c4aea3b1b()
             { revert(0, 0) }
-            function abi_decode(headStart, dataEnd)
-            {
-                if slt(sub(dataEnd, headStart), 0)
-                {
-                    revert_error_dbdddcbe895c83990c08b3492a0e83918d802a52331272ac6fdb6a7c4aea3b1b()
-                }
-            }
-            function abi_encode_uint256_to_uint256(value, pos)
-            { mstore(pos, value) }
-            function abi_encode_uint256(headStart, value0) -> tail
-            {
-                tail := add(headStart, 32)
-                abi_encode_uint256_to_uint256(value0, headStart)
-            }
-            function external_fun_testStaticStore()
-            {
-                if callvalue()
-                {
-                    revert_error_ca66f745a3ce8ff40e2ccaf1ad45db7774001b90d25810abd9040049be7bf4bb()
-                }
-                abi_decode(4, calldatasize())
-                let ret := fun_testStaticStore()
-                let memPos := mload(64)
-                let _1 := abi_encode_uint256(memPos, ret)
-                return(memPos, sub(_1, memPos))
-            }
             function validator_revert_uint256(value)
             { if 0 { revert(0, 0) } }
             function abi_decode_uint256(offset, end) -> value
@@ -83,6 +57,25 @@ object "CallerContract_117" {
                 }
                 value0 := abi_decode_uint256(headStart, dataEnd)
             }
+            function abi_encode_uint256_to_uint256(value, pos)
+            { mstore(pos, value) }
+            function abi_encode_uint256(headStart, value0) -> tail
+            {
+                tail := add(headStart, 32)
+                abi_encode_uint256_to_uint256(value0, headStart)
+            }
+            function external_fun_testStaticStore()
+            {
+                if callvalue()
+                {
+                    revert_error_ca66f745a3ce8ff40e2ccaf1ad45db7774001b90d25810abd9040049be7bf4bb()
+                }
+                let _1 := abi_decode_tuple_uint256(4, calldatasize())
+                let ret := fun_testStaticStore(_1)
+                let memPos := mload(64)
+                let _2 := abi_encode_uint256(memPos, ret)
+                return(memPos, sub(_2, memPos))
+            }
             function external_fun_testStoreAndRetrieveExternal()
             {
                 if callvalue()
@@ -92,6 +85,13 @@ object "CallerContract_117" {
                 let _1 := abi_decode_tuple_uint256(4, calldatasize())
                 fun_testStoreAndRetrieveExternal(_1)
                 return(0, 0)
+            }
+            function abi_decode(headStart, dataEnd)
+            {
+                if slt(sub(dataEnd, headStart), 0)
+                {
+                    revert_error_dbdddcbe895c83990c08b3492a0e83918d802a52331272ac6fdb6a7c4aea3b1b()
+                }
             }
             function external_fun_testStaticRetrieve()
             {
@@ -172,33 +172,34 @@ object "CallerContract_117" {
                 let _2 := update_byte_slice_shift(_1, value)
                 sstore(slot, _2)
             }
-            /// @ast-id 116 @src 0:844:1231  "function testStaticStore() public returns (uint256) { // Should raise a .StaticModeViolation..."
-            function fun_testStaticStore() -> var
+            /// @ast-id 119 @src 0:844:1251  "function testStaticStore(uint256 value) public returns (uint256) { // Should raise a .StaticModeViolation..."
+            function fun_testStaticStore(var_value) -> var
             {
-                /// @src 0:887:894  "uint256"
-                var := /** @src 0:151:1235  "contract CallerContract {..." */ 0
-                /// @src 0:1127:1168  "abi.encodeWithSignature(\"store(uint256)\")"
-                let expr_mpos := /** @src 0:151:1235  "contract CallerContract {..." */ mload(64)
-                /// @src 0:1127:1168  "abi.encodeWithSignature(\"store(uint256)\")"
+                /// @src 0:900:907  "uint256"
+                var := /** @src 0:151:1255  "contract CallerContract {..." */ 0
+                /// @src 0:1140:1188  "abi.encodeWithSignature(\"store(uint256)\", value)"
+                let expr_105_mpos := /** @src 0:151:1255  "contract CallerContract {..." */ mload(64)
+                /// @src 0:1140:1188  "abi.encodeWithSignature(\"store(uint256)\", value)"
                 let _1 := 0x20
-                let _2 := add(expr_mpos, _1)
+                let _2 := add(expr_105_mpos, _1)
                 mstore(_2, shl(224, 0x6057361d))
-                _2 := add(expr_mpos, 36)
-                mstore(expr_mpos, add(sub(_2, expr_mpos), /** @src 0:151:1235  "contract CallerContract {..." */ not(31)))
-                /// @src 0:1127:1168  "abi.encodeWithSignature(\"store(uint256)\")"
-                finalize_allocation(expr_mpos, sub(_2, expr_mpos))
-                /// @src 0:1083:1178  "storageContractAddr.staticcall(..."
-                let _3 := mload(expr_mpos)
-                let _4 := gas()
-                pop(staticcall(_4, /** @src 0:151:1235  "contract CallerContract {..." */ 2, /** @src 0:1083:1178  "storageContractAddr.staticcall(..." */ add(expr_mpos, _1), _3, 0, 0))
-                let expr_103_component_2_mpos := extract_returndata()
-                /// @src 0:151:1235  "contract CallerContract {..."
-                let _5 := mload(/** @src 0:1197:1224  "abi.decode(data, (uint256))" */ expr_103_component_2_mpos)
-                let expr := abi_decode_uint256_fromMemory(add(expr_103_component_2_mpos, _1), add(add(expr_103_component_2_mpos, /** @src 0:151:1235  "contract CallerContract {..." */ _5), /** @src 0:1197:1224  "abi.decode(data, (uint256))" */ _1))
-                /// @src 0:1188:1224  "number = abi.decode(data, (uint256))"
-                update_storage_value_offset_uint256_to_uint256(/** @src 0:1083:1178  "storageContractAddr.staticcall(..." */ 0, /** @src 0:1188:1224  "number = abi.decode(data, (uint256))" */ expr)
+                _2 := add(expr_105_mpos, 36)
+                let _3 := abi_encode_uint256(_2, var_value)
+                mstore(expr_105_mpos, add(sub(_3, expr_105_mpos), /** @src 0:151:1255  "contract CallerContract {..." */ not(31)))
+                /// @src 0:1140:1188  "abi.encodeWithSignature(\"store(uint256)\", value)"
+                finalize_allocation(expr_105_mpos, sub(_3, expr_105_mpos))
+                /// @src 0:1096:1198  "storageContractAddr.staticcall(..."
+                let _4 := mload(expr_105_mpos)
+                let _5 := gas()
+                pop(staticcall(_5, /** @src 0:151:1255  "contract CallerContract {..." */ 2, /** @src 0:1096:1198  "storageContractAddr.staticcall(..." */ add(expr_105_mpos, _1), _4, 0, 0))
+                let expr_106_component_2_mpos := extract_returndata()
+                /// @src 0:151:1255  "contract CallerContract {..."
+                let _6 := mload(/** @src 0:1217:1244  "abi.decode(data, (uint256))" */ expr_106_component_2_mpos)
+                let expr := abi_decode_uint256_fromMemory(add(expr_106_component_2_mpos, _1), add(add(expr_106_component_2_mpos, /** @src 0:151:1255  "contract CallerContract {..." */ _6), /** @src 0:1217:1244  "abi.decode(data, (uint256))" */ _1))
+                /// @src 0:1208:1244  "number = abi.decode(data, (uint256))"
+                update_storage_value_offset_uint256_to_uint256(/** @src 0:1096:1198  "storageContractAddr.staticcall(..." */ 0, /** @src 0:1208:1244  "number = abi.decode(data, (uint256))" */ expr)
             }
-            /// @src 0:151:1235  "contract CallerContract {..."
+            /// @src 0:151:1255  "contract CallerContract {..."
             function revert_error_0cc013b6b3b6beabea4e3a74a6d380f0df81852ca99887912475e1f66b2a2c20()
             { revert(0, 0) }
             function abi_decode_fromMemory(headStart, dataEnd)
@@ -220,19 +221,19 @@ object "CallerContract_117" {
             function fun_testStoreAndRetrieveExternal(var_v)
             {
                 /// @src 0:437:447  "c.store(v)"
-                let _1 := extcodesize(/** @src 0:151:1235  "contract CallerContract {..." */ 2)
+                let _1 := extcodesize(/** @src 0:151:1255  "contract CallerContract {..." */ 2)
                 /// @src 0:437:447  "c.store(v)"
                 if iszero(_1)
                 {
                     revert_error_0cc013b6b3b6beabea4e3a74a6d380f0df81852ca99887912475e1f66b2a2c20()
                 }
-                let _2 := /** @src 0:151:1235  "contract CallerContract {..." */ mload(64)
+                let _2 := /** @src 0:151:1255  "contract CallerContract {..." */ mload(64)
                 /// @src 0:437:447  "c.store(v)"
-                mstore(_2, /** @src 0:1127:1168  "abi.encodeWithSignature(\"store(uint256)\")" */ shl(224, 0x6057361d))
+                mstore(_2, /** @src 0:1140:1188  "abi.encodeWithSignature(\"store(uint256)\", value)" */ shl(224, 0x6057361d))
                 /// @src 0:437:447  "c.store(v)"
                 let _3 := abi_encode_uint256(add(_2, 4), var_v)
                 let _4 := gas()
-                let _5 := call(_4, /** @src 0:151:1235  "contract CallerContract {..." */ 2, /** @src 0:437:447  "c.store(v)" */ 0, _2, sub(_3, _2), _2, 0)
+                let _5 := call(_4, /** @src 0:151:1255  "contract CallerContract {..." */ 2, /** @src 0:437:447  "c.store(v)" */ 0, _2, sub(_3, _2), _2, 0)
                 if iszero(_5) { revert_forward() }
                 if _5
                 {
@@ -242,14 +243,14 @@ object "CallerContract_117" {
                     abi_decode_fromMemory(_2, add(_2, _6))
                 }
                 /// @src 0:466:478  "c.retrieve()"
-                let _7 := /** @src 0:151:1235  "contract CallerContract {..." */ mload(64)
+                let _7 := /** @src 0:151:1255  "contract CallerContract {..." */ mload(64)
                 /// @src 0:466:478  "c.retrieve()"
-                mstore(_7, /** @src 0:151:1235  "contract CallerContract {..." */ shl(224, 0x2e64cec1))
+                mstore(_7, /** @src 0:151:1255  "contract CallerContract {..." */ shl(224, 0x2e64cec1))
                 /// @src 0:466:478  "c.retrieve()"
                 let _8 := add(_7, /** @src 0:437:447  "c.store(v)" */ 4)
                 /// @src 0:466:478  "c.retrieve()"
                 let _9 := gas()
-                let _10 := call(_9, /** @src 0:151:1235  "contract CallerContract {..." */ 2, /** @src 0:437:447  "c.store(v)" */ 0, /** @src 0:466:478  "c.retrieve()" */ _7, sub(/** @src 0:151:1235  "contract CallerContract {..." */ _8, /** @src 0:466:478  "c.retrieve()" */ _7), _7, 32)
+                let _10 := call(_9, /** @src 0:151:1255  "contract CallerContract {..." */ 2, /** @src 0:437:447  "c.store(v)" */ 0, /** @src 0:466:478  "c.retrieve()" */ _7, sub(/** @src 0:151:1255  "contract CallerContract {..." */ _8, /** @src 0:466:478  "c.retrieve()" */ _7), _7, 32)
                 if iszero(_10) { revert_forward() }
                 let expr
                 if _10
@@ -267,31 +268,31 @@ object "CallerContract_117" {
             function fun_testStaticRetrieve() -> var_
             {
                 /// @src 0:537:544  "uint256"
-                var_ := /** @src 0:151:1235  "contract CallerContract {..." */ 0
+                var_ := /** @src 0:151:1255  "contract CallerContract {..." */ 0
                 /// @src 0:738:775  "abi.encodeWithSignature(\"retrieve()\")"
-                let expr_67_mpos := /** @src 0:151:1235  "contract CallerContract {..." */ mload(64)
+                let expr_mpos := /** @src 0:151:1255  "contract CallerContract {..." */ mload(64)
                 /// @src 0:738:775  "abi.encodeWithSignature(\"retrieve()\")"
                 let _1 := 0x20
-                let _2 := add(expr_67_mpos, _1)
-                mstore(_2, /** @src 0:151:1235  "contract CallerContract {..." */ shl(224, 0x2e64cec1))
+                let _2 := add(expr_mpos, _1)
+                mstore(_2, /** @src 0:151:1255  "contract CallerContract {..." */ shl(224, 0x2e64cec1))
                 /// @src 0:738:775  "abi.encodeWithSignature(\"retrieve()\")"
-                _2 := add(expr_67_mpos, 36)
-                mstore(expr_67_mpos, add(sub(_2, expr_67_mpos), /** @src 0:151:1235  "contract CallerContract {..." */ not(31)))
+                _2 := add(expr_mpos, 36)
+                mstore(expr_mpos, add(sub(_2, expr_mpos), /** @src 0:151:1255  "contract CallerContract {..." */ not(31)))
                 /// @src 0:738:775  "abi.encodeWithSignature(\"retrieve()\")"
-                finalize_allocation(expr_67_mpos, sub(_2, expr_67_mpos))
+                finalize_allocation(expr_mpos, sub(_2, expr_mpos))
                 /// @src 0:694:785  "storageContractAddr.staticcall(..."
-                let _3 := mload(expr_67_mpos)
+                let _3 := mload(expr_mpos)
                 let _4 := gas()
-                pop(staticcall(_4, /** @src 0:151:1235  "contract CallerContract {..." */ 2, /** @src 0:694:785  "storageContractAddr.staticcall(..." */ add(expr_67_mpos, _1), _3, 0, 0))
+                pop(staticcall(_4, /** @src 0:151:1255  "contract CallerContract {..." */ 2, /** @src 0:694:785  "storageContractAddr.staticcall(..." */ add(expr_mpos, _1), _3, 0, 0))
                 let expr_component_mpos := extract_returndata()
-                /// @src 0:151:1235  "contract CallerContract {..."
+                /// @src 0:151:1255  "contract CallerContract {..."
                 let _5 := mload(/** @src 0:804:831  "abi.decode(data, (uint256))" */ expr_component_mpos)
-                let expr := abi_decode_uint256_fromMemory(add(expr_component_mpos, _1), add(add(expr_component_mpos, /** @src 0:151:1235  "contract CallerContract {..." */ _5), /** @src 0:804:831  "abi.decode(data, (uint256))" */ _1))
+                let expr := abi_decode_uint256_fromMemory(add(expr_component_mpos, _1), add(add(expr_component_mpos, /** @src 0:151:1255  "contract CallerContract {..." */ _5), /** @src 0:804:831  "abi.decode(data, (uint256))" */ _1))
                 /// @src 0:795:831  "number = abi.decode(data, (uint256))"
                 update_storage_value_offset_uint256_to_uint256(/** @src 0:694:785  "storageContractAddr.staticcall(..." */ 0, /** @src 0:795:831  "number = abi.decode(data, (uint256))" */ expr)
             }
         }
-        data ".metadata" hex"a2646970667358221220e9f79a9fe7092dd96315e5affd6a99d509ee8263d58806ae1622d00690220d5c64736f6c634300081e0033"
+        data ".metadata" hex"a2646970667358221220e24661e83e0bb60c2412c749f45703a27bf49c055bcde51c906f337d26b3685564736f6c634300081e0033"
     }
 }
 
