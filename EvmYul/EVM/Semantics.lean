@@ -92,7 +92,7 @@ def decode (arr : ByteArray) (pc : UInt256) :
     else .some (EvmYul.uInt256OfByteArray (arr.extract' pc.toNat.succ (pc.toNat.succ + argWidth)), argWidth)
   )
 
-def fetchInstr (I : EvmYul.ExecutionEnv) (pc : UInt256) :
+def fetchInstr (I : EvmYul.ExecutionEnv .EVM) (pc : UInt256) :
                Except EVM.ExecutionException (Operation .EVM × Option (UInt256 × Nat)) :=
   decode I.code pc |>.option (.error .StackUnderflow) Except.ok
 
@@ -175,7 +175,7 @@ def call (fuel : Nat)
               (s  := source)
               (o  := evmState.executionEnv.sender)          -- Iₒ in Θ(.., Iₒ, ..)
               (r  := recipient)                             -- t in Θ(.., t, ..)
-              (c  := toExecute σ t)
+              (c  := toExecute .EVM σ t)
               (g  := .ofNat callgas)
               (p  := .ofNat evmState.executionEnv.gasPrice) -- Iₚ in Θ(.., Iₚ, ..)
               (v  := value)
@@ -233,68 +233,6 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         | .some (instr, arg) => pure (instr, arg)
     let evmState := { evmState with execLength := evmState.execLength + 1 }
     match instr with
-      | .Push .PUSH0 =>
-        let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-        .ok <|
-          evmState.replaceStackAndIncrPC (evmState.stack.push ⟨0⟩)
-      | .Push _ => do
-        let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-        let some (arg, argWidth) := arg | .error .StackUnderflow
-        .ok <| evmState.replaceStackAndIncrPC (evmState.stack.push arg) (pcΔ := argWidth.succ)
-      | .JUMP =>
-        let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-        match evmState.stack.pop with
-          | some ⟨stack , μ₀⟩ =>
-            let newPc := μ₀
-            .ok <| {evmState with pc := newPc, stack := stack}
-          | _ => .error .StackUnderflow
-      | .JUMPI =>
-        let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-        match evmState.stack.pop2 with
-          | some ⟨stack , μ₀, μ₁⟩ =>
-            let newPc := if μ₁ != ⟨0⟩ then μ₀ else evmState.pc + ⟨1⟩
-            .ok <| {evmState with pc := newPc, stack := stack}
-          | _ => .error .StackUnderflow
-      | .PC =>
-        let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-        .ok <| evmState.replaceStackAndIncrPC (evmState.stack.push evmState.pc)
-      | .JUMPDEST =>
-        let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-        .ok evmState.incrPC
-
-      | .DUP1 => dup 1 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP2 => dup 2 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP3 => dup 3 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP4 => dup 4 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP5 => dup 5 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP6 => dup 6 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP7 => dup 7 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP8 => dup 8 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP9 => dup 9 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP10 => dup 10 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP11 => dup 11 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP12 => dup 12 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP13 => dup 13 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP14 => dup 14 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP15 => dup 15 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .DUP16 => dup 16 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-
-      | .SWAP1 => swap 1 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP2 => swap 2 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP3 => swap 3 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP4 => swap 4 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP5 => swap 5 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP6 => swap 6 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP7 => swap 7 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP8 => swap 8 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP9 => swap 9 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP10 => swap 10 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP11 => swap 11 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP12 => swap 12 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP13 => swap 13 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP14 => swap 14 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP15 => swap 15 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-      | .SWAP16 => swap 16 {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
       | .CREATE =>
         let evmState := {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
         match evmState.stack.pop3 with
@@ -306,7 +244,7 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
             let Iₒ := evmState.executionEnv.sender
             let Iₑ := evmState.executionEnv.depth
             let σ := evmState.accountMap
-            let σ_Iₐ : Account := σ.find? Iₐ |>.getD default
+            let σ_Iₐ : Account .EVM := σ.find? Iₐ |>.getD default
             let σStar := σ.insert Iₐ {σ_Iₐ with nonce := σ_Iₐ.nonce + ⟨1⟩}
 
             let (a, evmState', g', z, o)
@@ -376,7 +314,7 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
             let Iₒ := evmState.executionEnv.sender
             let Iₑ := evmState.executionEnv.depth
             let σ := evmState.accountMap
-            let σ_Iₐ : Account := σ.find? Iₐ |>.getD default
+            let σ_Iₐ : Account .EVM := σ.find? Iₐ |>.getD default
             let σStar := σ.insert Iₐ {σ_Iₐ with nonce := σ_Iₐ.nonce + ⟨1⟩}
             let (a, evmState', g', z, o) : (AccountAddress × EVM.State × UInt256 × Bool × ByteArray) :=
               if σ_Iₐ.nonce.toNat ≥ 2^64-1 then (default, evmState, .ofNat (L evmState.gasAvailable.toNat), False, .empty) else
@@ -483,8 +421,7 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         let μ'ₛ := stack.push x -- μ′s[0] ≡ x
         let evmState' := state'.replaceStackAndIncrPC μ'ₛ
         .ok evmState'
-      | instr =>
-        EvmYul.step instr {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
+      | instr => EvmYul.step instr arg {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
 
 /--
   Iterative progression of `step`
@@ -538,7 +475,7 @@ def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
 
         if (w = .SSTORE) ∧ evmState.gasAvailable.toNat ≤ GasConstants.Gcallstipend then
           .error .OutOfGass
-      
+
         if
           w.isCreate ∧ evmState.stack.getD 2 ⟨0⟩ > ⟨49152⟩
         then
@@ -590,15 +527,15 @@ def Ξ -- Type `Ξ` using `\GX` or `\Xi`
   (createdAccounts : Batteries.RBSet AccountAddress compare)
   (genesisBlockHeader : BlockHeader)
   (blocks : ProcessedBlocks)
-  (σ : AccountMap)
-  (σ₀ : AccountMap)
+  (σ : AccountMap .EVM)
+  (σ₀ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
   Except
     EVM.ExecutionException
-    (ExecutionResult (Batteries.RBSet AccountAddress compare × AccountMap × UInt256 × Substate))
+    (ExecutionResult (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate))
 := do
   match fuel with
     | 0 => .error .OutOfFuel
@@ -628,8 +565,8 @@ def Lambda
   (createdAccounts : Batteries.RBSet AccountAddress compare) -- needed for EIP-6780
   (genesisBlockHeader : BlockHeader)
   (blocks : ProcessedBlocks)
-  (σ : AccountMap)
-  (σ₀ : AccountMap)
+  (σ : AccountMap .EVM)
+  (σ₀ : AccountMap .EVM)
   (A : Substate)
   (s : AccountAddress)   -- sender
   (o : AccountAddress)   -- original transactor
@@ -645,7 +582,7 @@ def Lambda
   Except EVM.ExecutionException
     ( AccountAddress
     × Batteries.RBSet AccountAddress compare
-    × AccountMap
+    × AccountMap .EVM
     × UInt256
     × Substate
     × Bool
@@ -687,7 +624,7 @@ def Lambda
       (⟨#[0xfe]⟩, createdAccounts)
     else (i, createdAccounts.insert a)
 
-  let newAccount : Account :=
+  let newAccount : Account .EVM :=
     { existentAccount with
         nonce := existentAccount.nonce + ⟨1⟩
         balance := v + existentAccount.balance
@@ -701,12 +638,12 @@ def Lambda
         σ.insert s {ac with balance := ac.balance - v}
           |>.insert a newAccount -- (99)
   -- I
-  let exEnv : ExecutionEnv :=
+  let exEnv : ExecutionEnv .EVM :=
     { codeOwner := a
     , sender    := o
     , source    := s
     , weiValue  := v
-    , inputData := default
+    , calldata := default
     , code      := i
     , gasPrice  := p.toNat
     , header    := H
@@ -735,7 +672,7 @@ def Lambda
         let F₄ : Bool := ¬F₃ && returnedData[0]? = some 0xef
         pure (F₀ ∨ F₂ ∨ F₃ ∨ F₄)
 
-      let σ' : AccountMap := -- (115)
+      let σ' : AccountMap .EVM := -- (115)
         if F then σ else
           let newAccount' := σStarStar.findD a default
           σStarStar.insert a {newAccount' with code := returnedData}
@@ -782,13 +719,13 @@ def Θ (fuel : Nat)
       (createdAccounts : Batteries.RBSet AccountAddress compare)
       (genesisBlockHeader : BlockHeader)
       (blocks : ProcessedBlocks)
-      (σ  : AccountMap)
-      (σ₀  : AccountMap)
+      (σ  : AccountMap .EVM)
+      (σ₀  : AccountMap .EVM)
       (A  : Substate)
       (s  : AccountAddress)
       (o  : AccountAddress)
       (r  : AccountAddress)
-      (c  : ToExecute)
+      (c  : ToExecute .EVM)
       (g  : UInt256)
       (p  : UInt256)
       (v  : UInt256)
@@ -798,7 +735,7 @@ def Θ (fuel : Nat)
       (H : BlockHeader)
       (w  : Bool)
         :
-      Except EVM.ExecutionException (Batteries.RBSet AccountAddress compare × AccountMap × UInt256 × Substate × Bool × ByteArray)
+      Except EVM.ExecutionException (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate × Bool × ByteArray)
 :=
   match fuel with
     | 0 => .error .OutOfFuel
@@ -809,7 +746,7 @@ def Θ (fuel : Nat)
     match σ.find? r with
       | none =>
         if v != ⟨0⟩ then
-          σ.insert r { (default : Account) with balance := v}
+          σ.insert r { (default : Account .EVM) with balance := v}
         else
           σ
       | some acc =>
@@ -822,12 +759,12 @@ def Θ (fuel : Nat)
       | some acc =>
         σ'₁.insert s { acc with balance := acc.balance - v}
 
-  let I : ExecutionEnv :=
+  let I : ExecutionEnv .EVM :=
     {
       codeOwner := r        -- Equation (132)
       sender    := o        -- Equation (133)
       gasPrice  := p.toNat  -- Equation (134)
-      inputData := d        -- Equation (135)
+      calldata := d        -- Equation (135)
       source    := s        -- Equation (136)
       weiValue  := v'       -- Equation (137)
       depth     := e        -- Equation (138)
@@ -884,14 +821,14 @@ open Batteries (RBMap RBSet)
 
 -- Type Υ using \Upsilon or \GU
 def Υ (fuel : ℕ)
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (H_f : ℕ)
   (H : BlockHeader)
   (genesisBlockHeader : BlockHeader)
   (blocks : ProcessedBlocks)
   (T : Transaction)
   (S_T : AccountAddress)
-  : Except EVM.Exception (AccountMap × Substate × Bool × UInt256)
+  : Except EVM.Exception (AccountMap .EVM × Substate × Bool × UInt256)
 := do
   let g₀ : ℕ := EVM.intrinsicGas T
   -- "here can be no invalid transactions from this point"
@@ -978,7 +915,7 @@ def Υ (fuel : ℕ)
             S_T
             S_T
             t
-            (toExecute σ₀ t)
+            (toExecute .EVM σ₀ t)
             g
             p
             T.base.value
@@ -994,12 +931,12 @@ def Υ (fuel : ℕ)
   let gStar := g' + min ((T.base.gasLimit - g') / ⟨5⟩) A.refundBalance
   -- The pre-final state (83)
   let σStar :=
-    σ_P.increaseBalance S_T (gStar * p)
+    σ_P.increaseBalance .EVM S_T (gStar * p)
 
   let beneficiaryFee := (T.base.gasLimit - gStar) * f
   let σStar' :=
     if beneficiaryFee != ⟨0⟩ then
-      σStar.increaseBalance H.beneficiary beneficiaryFee
+      σStar.increaseBalance .EVM H.beneficiary beneficiaryFee
     else σStar
   let σ' := A.selfDestructSet.1.foldl Batteries.RBMap.erase σStar' -- (87)
   let deadAccounts := A.touchedAccounts.filter (State.dead σStar' ·)

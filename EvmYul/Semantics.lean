@@ -19,9 +19,46 @@ import EvmYul.MachineStateOps
 
 import EvmYul.SpongeHash.Keccak256
 
+--
+
+import Mathlib.Data.BitVec
+import Mathlib.Data.Array.Defs
+import Mathlib.Data.Finmap
+import Mathlib.Data.List.Defs
+import EvmYul.Data.Stack
+
+import EvmYul.Maps.AccountMap
+import EvmYul.Maps.AccountMap
+
+import EvmYul.State.AccountOps
+import EvmYul.State.ExecutionEnv
+import EvmYul.State.Substate
+import EvmYul.State.TransactionOps
+
+import EvmYul.EVM.Exception
+import EvmYul.EVM.Gas
+import EvmYul.EVM.GasConstants
+import EvmYul.EVM.State
+import EvmYul.EVM.StateOps
+import EvmYul.EVM.Exception
+import EvmYul.EVM.Instr
+import EvmYul.EVM.PrecompiledContracts
+
+import EvmYul.Operations
+import EvmYul.Pretty
+import EvmYul.SharedStateOps
+import EvmYul.Wheels
+import EvmYul.EllipticCurves
+import EvmYul.UInt256
+import EvmYul.MachineState
+
+--
+
 namespace EvmYul
 
 section Semantics
+
+open Stack
 
 /--
 `Transformer` is the primop-evaluating semantic function type for `Yul` and `EVM`.
@@ -61,12 +98,12 @@ private def dispatchQuartiary (τ : OperationType) : Primop.Quaternary → Trans
     | .EVM => EVM.execQuadOp
     | .Yul => Yul.execQuadOp
 
-private def dispatchExecutionEnvOp (τ : OperationType) (op : ExecutionEnv → UInt256) : Transformer τ :=
+private def dispatchExecutionEnvOp (τ : OperationType) (op : ExecutionEnv τ → UInt256) : Transformer τ :=
   match τ with
     | .EVM => EVM.executionEnvOp op
     | .Yul => Yul.executionEnvOp op
 
-private def dispatchUnaryExecutionEnvOp (τ : OperationType) (op : ExecutionEnv → UInt256 → UInt256) : Transformer τ :=
+private def dispatchUnaryExecutionEnvOp (τ : OperationType) (op : ExecutionEnv τ → UInt256 → UInt256) : Transformer τ :=
   match τ with
     | .EVM => EVM.unaryExecutionEnvOp op
     | .Yul => Yul.unaryExecutionEnvOp op
@@ -76,13 +113,13 @@ private def dispatchMachineStateOp (τ : OperationType) (op : MachineState → U
     | .EVM => EVM.machineStateOp op
     | .Yul => Yul.machineStateOp op
 
-private def dispatchUnaryStateOp (τ : OperationType) (op : State → UInt256 → State × UInt256) : Transformer τ :=
+private def dispatchUnaryStateOp (τ : OperationType) (op : State τ → UInt256 → State τ × UInt256) : Transformer τ :=
   match τ with
     | .EVM => EVM.unaryStateOp op
     | .Yul => Yul.unaryStateOp op
 
 private def dispatchTernaryCopyOp
- (τ : OperationType) (op : SharedState → UInt256 → UInt256 → UInt256 → SharedState) :
+ (τ : OperationType) (op : SharedState τ → UInt256 → UInt256 → UInt256 → SharedState τ) :
   Transformer τ
 :=
   match τ with
@@ -90,7 +127,7 @@ private def dispatchTernaryCopyOp
     | .Yul => Yul.ternaryCopyOp op
 
 private def dispatchQuaternaryCopyOp
- (τ : OperationType) (op : SharedState → UInt256 → UInt256 → UInt256 → UInt256 → SharedState) :
+ (τ : OperationType) (op : SharedState τ → UInt256 → UInt256 → UInt256 → UInt256 → SharedState τ) :
   Transformer τ
 :=
   match τ with
@@ -122,14 +159,14 @@ private def dispatchBinaryMachineStateOp'
     | .Yul => Yul.binaryMachineStateOp' op
 
 private def dispatchBinaryStateOp
- (τ : OperationType) (op : State → UInt256 → UInt256 → State) :
+ (τ : OperationType) (op : State τ → UInt256 → UInt256 → State τ) :
   Transformer τ
 :=
   match τ with
     | .EVM => EVM.binaryStateOp op
     | .Yul => Yul.binaryStateOp op
 
-private def dispatchStateOp (τ : OperationType) (op : State → UInt256) : Transformer τ :=
+private def dispatchStateOp (τ : OperationType) (op : State τ → UInt256) : Transformer τ :=
   match τ with
     | .EVM => EVM.stateOp op
     | .Yul => Yul.stateOp op
@@ -146,33 +183,50 @@ private def dispatchLog1 (τ : OperationType) : Transformer τ :=
 
 private def dispatchLog2 (τ : OperationType) : Transformer τ :=
   match τ with
-    | .EVM => EVM.log2Op 
+    | .EVM => EVM.log2Op
     | .Yul => Yul.log2Op
 
 private def dispatchLog3 (τ : OperationType) : Transformer τ :=
   match τ with
-    | .EVM => EVM.log3Op 
+    | .EVM => EVM.log3Op
     | .Yul => Yul.log3Op
 
 private def dispatchLog4 (τ : OperationType) : Transformer τ :=
   match τ with
-    | .EVM => EVM.log4Op 
+    | .EVM => EVM.log4Op
     | .Yul => Yul.log4Op
 
 private def L (n : ℕ) := n - n / 64
 
--- TODO: Yul halting for `SELFDESTRUCT`, `RETURN`, `REVERT`, `STOP`
-def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
+def dup (n : ℕ) : Transformer .EVM :=
+  λ s ↦
+  let top := s.stack.take n
+  if top.length = n then
+    .ok <| s.replaceStackAndIncrPC (top.getLast! :: s.stack)
+  else
+    .error .StackUnderflow
+
+def swap (n : ℕ) : Transformer .EVM :=
+  λ s ↦
+  let top := s.stack.take (n + 1)
+  let bottom := s.stack.drop (n + 1)
+  if List.length top = (n + 1) then
+    .ok <| s.replaceStackAndIncrPC (top.getLast! :: top.tail!.dropLast ++ [top.head!] ++ bottom)
+  else
+    .error .StackUnderflow
+
+-- TODO: Yul halting for `SELFDESTRUCT`
+def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat) := .none) : Transformer τ := Id.run do
   let _ : Id Unit := -- For debug logging
     match τ with
       | .EVM => dbg_trace op.pretty; pure ()
-      | .Yul => pure ()
+      | .Yul => dbg_trace op.pretty; pure ()
   match τ, op with
-    -- TODO: Revisit STOP, this is likely not the best way to do it and the Yul version is WIP.
+    -- TODO: Revisit STOP, this is likely not the best way to do it.
     | τ, .STOP =>
       match τ with
         | .EVM => λ evmState ↦ .ok <| {evmState with toMachineState := evmState.toMachineState.setReturnData .empty}
-        | .Yul => λ yulState _ ↦ .ok (yulState, none)
+        | .Yul => λ yulState _ ↦ .error (Yul.Exception.YulHalt yulState ⟨0⟩)
     | τ, .ADD =>
       dispatchBinary τ UInt256.add
     | τ, .MUL =>
@@ -240,19 +294,21 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
     | τ, .CALLDATALOAD =>
       dispatchUnaryStateOp τ (λ s v ↦ (s, EvmYul.State.calldataload s v))
     | τ, .CALLDATASIZE =>
-      dispatchExecutionEnvOp τ (.ofNat ∘ ByteArray.size ∘ ExecutionEnv.inputData)
+      dispatchExecutionEnvOp τ (.ofNat ∘ ByteArray.size ∘ ExecutionEnv.calldata)
     | τ, .CALLDATACOPY =>
       dispatchTernaryCopyOp τ .calldatacopy
-    | τ, .CODESIZE =>
-      dispatchExecutionEnvOp τ (.ofNat ∘ ByteArray.size ∘ ExecutionEnv.code)
-    | τ, .CODECOPY =>
-      dispatchTernaryCopyOp τ .codeCopy
+    | .EVM, .CODESIZE =>
+      dispatchExecutionEnvOp .EVM (.ofNat ∘ ByteArray.size ∘ ExecutionEnv.code)
+    | .EVM, .CODECOPY =>
+      dispatchTernaryCopyOp .EVM .codeCopy
     | τ, .GASPRICE =>
       dispatchExecutionEnvOp τ (.ofNat ∘ ExecutionEnv.gasPrice)
-    | τ, .EXTCODESIZE =>
-      dispatchUnaryStateOp τ EvmYul.State.extCodeSize
-    | τ, .EXTCODECOPY =>
-      dispatchQuaternaryCopyOp τ EvmYul.SharedState.extCodeCopy'
+    | .EVM, .EXTCODESIZE =>
+      dispatchUnaryStateOp .EVM EvmYul.State.extCodeSize
+    | .Yul, .EXTCODESIZE =>
+      λ _ _ ↦ .error .YulEXTCODESIZENotImplemented
+    | .EVM, .EXTCODECOPY =>
+      dispatchQuaternaryCopyOp .EVM EvmYul.SharedState.extCodeCopy'
     | τ, .RETURNDATASIZE =>
       dispatchMachineStateOp τ EvmYul.MachineState.returndatasize
     | .EVM, .RETURNDATACOPY =>
@@ -270,7 +326,7 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
             let mState' := yulState.toSharedState.toMachineState.returndatacopy a b c
             .ok <| (yulState.setMachineState mState', .none)
           | _ => .error .InvalidArguments
-    | τ, .EXTCODEHASH => dispatchUnaryStateOp τ EvmYul.State.extCodeHash
+    | .EVM, .EXTCODEHASH => dispatchUnaryStateOp .EVM EvmYul.State.extCodeHash
 
     | τ, .BLOCKHASH => dispatchUnaryStateOp τ (λ s v ↦ (s, EvmYul.State.blockHash s v))
     | τ, .COINBASE => dispatchStateOp τ (.ofNat ∘ Fin.val ∘ EvmYul.State.coinBase)
@@ -326,47 +382,16 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
     | τ, .LOG2 => dispatchLog2 τ
     | τ, .LOG3 => dispatchLog3 τ
     | τ, .LOG4 => dispatchLog4 τ
-
-    | .Yul, .CREATE => λ yulState lits ↦
-        match lits with
-          | [v, poz, len] =>
-            let Iₐ := yulState.executionEnv.codeOwner
-            let nonce' : UInt256 := yulState.toState.accountMap.find? Iₐ |>.option ⟨0⟩ (·.nonce)
-            let s : 𝕋 := .𝔹 (toBytesBigEndian Iₐ.val).toByteArray
-            let n : 𝕋 := .𝔹 (toBytesBigEndian nonce'.toNat).toByteArray
-            let L_A := RLP <| .𝕃 [s, n]
-            match L_A with
-              | none => .error .NotEncodableRLP
-              | some L_A =>
-                let addr : AccountAddress :=
-                  (ffi.KEC L_A).extract 12 32 /- 160 bits = 20 bytes -/
-                    |> fromByteArrayBigEndian |> Fin.ofNat _
-                let code := yulState.toMachineState.memory.readWithPadding poz.toNat len.toNat
-                match yulState.toState.accountMap.find? Iₐ with
-                  | none => .ok <| (yulState, some ⟨0⟩)
-                  | some ac_Iₐ =>
-                    if v < ac_Iₐ.balance then .ok <| (yulState, some ⟨0⟩) else
-                    let ac_Iₐ := {ac_Iₐ with balance := ac_Iₐ.balance - v, nonce := ac_Iₐ.nonce + ⟨1⟩}
-                    let v' :=
-                      match yulState.toState.accountMap.find? addr with
-                        | none => ⟨0⟩
-                        | some ac_addr => ac_addr.balance
-                    let newAccount : Account :=
-                      { nonce := ⟨1⟩
-                      , balance := v + v'
-                      , code := code
-                      , storage := default
-                      , tstorage := default
-                      }
-                    let yulState' :=
-                      yulState.setState <|
-                        yulState.toState.updateAccount addr newAccount
-                        |>.updateAccount Iₐ ac_Iₐ
-
-                    .ok <| (yulState', some (.ofNat addr))
-          | _ => .error .InvalidArguments
-    | τ, .RETURN => dispatchBinaryMachineStateOp τ MachineState.evmReturn
-    | τ, .REVERT => dispatchBinaryMachineStateOp τ MachineState.evmRevert
+    | .EVM, .RETURN => dispatchBinaryMachineStateOp .EVM MachineState.evmReturn
+    | .Yul, .RETURN => λ yulState lits ↦ 
+        match (dispatchBinaryMachineStateOp .Yul MachineState.evmReturn) yulState lits with
+          | .error e => .error e
+          | .ok (s, v) => .error (Yul.Exception.YulHalt s (v.getD ⟨1⟩))
+    | .EVM, .REVERT => dispatchBinaryMachineStateOp .EVM MachineState.evmRevert
+    | .Yul, .REVERT => λ yulState lits ↦ 
+        match (dispatchBinaryMachineStateOp .Yul MachineState.evmRevert) yulState lits with
+          | .error e => .error e
+          | .ok (_, _) => .error (Yul.Exception.Revert)
     | .EVM, .SELFDESTRUCT =>
       λ evmState ↦
         match evmState.stack.pop with
@@ -393,7 +418,7 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
                           evmState.accountMap
                         else
                           evmState.accountMap.insert r
-                            {(default : Account) with balance := σ_Iₐ.balance}
+                            {(default : Account .EVM) with balance := σ_Iₐ.balance}
                               |>.insert Iₐ {σ_Iₐ with balance := ⟨0⟩}
                       | some σ_r =>
                         if r ≠ Iₐ then
@@ -429,7 +454,7 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
                           evmState.accountMap
                         else
                           evmState.accountMap.insert r
-                            {(default : Account) with balance := σ_Iₐ.balance}
+                            {(default : Account .EVM) with balance := σ_Iₐ.balance}
                               |>.insert Iₐ {σ_Iₐ with balance := ⟨0⟩}
                       | some σ_r =>
                         if r ≠ Iₐ then
@@ -471,7 +496,7 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
                           yulState.toState.accountMap
                         else
                           yulState.toState.accountMap.insert r
-                            {(default : Account) with balance := σ_Iₐ.balance}
+                            {(default : Account .Yul) with balance := σ_Iₐ.balance}
                               |>.insert Iₐ {σ_Iₐ with balance := ⟨0⟩}
                       | some σ_r =>
                         if r ≠ Iₐ then
@@ -488,44 +513,63 @@ def step {τ : OperationType} (op : Operation τ) : Transformer τ := Id.run do
               .ok <| (yulState', none)
         | _ => .error .InvalidArguments
     | τ, .INVALID => dispatchInvalid τ
-
-    | .Yul, .CREATE2 => λ yulState lits ↦
-        match lits with
-          | [v, poz, len, ζ] =>
-            let Iₐ := yulState.executionEnv.codeOwner
-            let this₀ := toBytesBigEndian Iₐ.val
-            let this : List UInt8 := List.replicate (20 - this₀.length) 0 ++ this₀
-            let code := yulState.toMachineState.memory.readWithPadding poz.toNat len.toNat
-            let s : List UInt8 := toBytesBigEndian ζ.toNat
-            let a₀ : List UInt8 := [0xff]
-            let addr₀ := ffi.KEC <| ⟨⟨a₀ ++ this ++ s⟩⟩ ++ ffi.KEC code
-            let addr : AccountAddress := Fin.ofNat _ <| fromByteArrayBigEndian addr₀
-            match yulState.toState.accountMap.find? Iₐ with
-              | none => .ok <| (yulState, some ⟨0⟩)
-              | some ac_Iₐ =>
-                if v < ac_Iₐ.balance then .ok <| (yulState, some ⟨0⟩) else
-                let ac_Iₐ' := {ac_Iₐ with balance := ac_Iₐ.balance - v, nonce := ac_Iₐ.nonce + ⟨1⟩}
-                let v' :=
-                  match yulState.toState.accountMap.find? addr with
-                    | none => ⟨0⟩
-                    | some ac_addr => ac_addr.balance
-                let newAccount : Account :=
-                  { nonce := ⟨1⟩
-                  , balance := v + v'
-                  , code := code
-                  , storage := default
-                  , tstorage := default
-                  }
-                let yulState' :=
-                  yulState.setState <|
-                    yulState.toState.updateAccount addr newAccount
-                      |>.updateAccount Iₐ ac_Iₐ'
-
-                .ok <| (yulState', some (.ofNat addr))
-          | _ => .error .InvalidArguments
-
-    | .Yul, _ => λ _ _ ↦ default
+    | .EVM, .Push .PUSH0 => λ evmState =>
+        .ok <|
+          evmState.replaceStackAndIncrPC (evmState.stack.push ⟨0⟩)
+    | .EVM, .Push _ => λ evmState => do
+        let some (arg, argWidth) := arg | .error .StackUnderflow
+        .ok <| evmState.replaceStackAndIncrPC (evmState.stack.push arg) (pcΔ := argWidth.succ)
+    | .EVM, .JUMP => λ evmState => do
+        match evmState.stack.pop with
+          | some ⟨stack , μ₀⟩ =>
+            let newPc := μ₀
+            .ok <| {evmState with pc := newPc, stack := stack}
+          | _ => .error .StackUnderflow
+    | .EVM, .JUMPI => λ evmState => do
+        match evmState.stack.pop2 with
+          | some ⟨stack , μ₀, μ₁⟩ =>
+            let newPc := if μ₁ != ⟨0⟩ then μ₀ else evmState.pc + ⟨1⟩
+            .ok <| {evmState with pc := newPc, stack := stack}
+          | _ => .error .StackUnderflow
+    | .EVM, .PC => λ evmState =>
+        .ok <| evmState.replaceStackAndIncrPC (evmState.stack.push evmState.pc)
+    | .EVM, .JUMPDEST => λ evmState => do
+        .ok <| evmState.incrPC
+    | .EVM, .DUP1 => dup 1
+    | .EVM, .DUP2 => dup 2
+    | .EVM, .DUP3 => dup 3
+    | .EVM, .DUP4 => dup 4
+    | .EVM, .DUP5 => dup 5
+    | .EVM, .DUP6 => dup 6
+    | .EVM, .DUP7 => dup 7
+    | .EVM, .DUP8 => dup 8
+    | .EVM, .DUP9 => dup 9
+    | .EVM, .DUP10 => dup 10
+    | .EVM, .DUP11 => dup 11
+    | .EVM, .DUP12 => dup 12
+    | .EVM, .DUP13 => dup 13
+    | .EVM, .DUP14 => dup 14
+    | .EVM, .DUP15 => dup 15
+    | .EVM, .DUP16 => dup 16
+    | .EVM, .SWAP1 => swap 1
+    | .EVM, .SWAP2 => swap 2
+    | .EVM, .SWAP3 => swap 3
+    | .EVM, .SWAP4 => swap 4
+    | .EVM, .SWAP5 => swap 5
+    | .EVM, .SWAP6 => swap 6
+    | .EVM, .SWAP7 => swap 7
+    | .EVM, .SWAP8 => swap 8
+    | .EVM, .SWAP9 => swap 9
+    | .EVM, .SWAP10 => swap 10
+    | .EVM, .SWAP11 => swap 11
+    | .EVM, .SWAP12 => swap 12
+    | .EVM, .SWAP13 => swap 13
+    | .EVM, .SWAP14 => swap 14
+    | .EVM, .SWAP15 => swap 15
+    | .EVM, .SWAP16 => swap 16
     | .EVM, _ => λ _ ↦ default
+    | .Yul, .POP => λ yulState _ ↦ .ok (yulState, .none) -- POP is a no-op for Yul as it discards the value only as a hint to the compiler.
+    | .Yul, _ => λ _ _ ↦ default
 
 end Semantics
 

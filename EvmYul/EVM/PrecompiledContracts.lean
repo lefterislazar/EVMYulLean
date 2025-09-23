@@ -21,19 +21,19 @@ import EvmYul.FFI.ffi
 open EvmYul
 
 def Ξ_ECREC
-  (σ : AccountMap)
+  (σ : (AccountMap .EVM))
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ := 3000
 
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let d := I.inputData
+    let d := I.calldata
     let h := d.readBytes 0 32
     let v := d.readBytes 32 32
     let r := d.readBytes 64 32
@@ -54,15 +54,15 @@ def Ξ_ECREC
     (true, σ, g - .ofNat gᵣ, A, o)
 
 def Ξ_SHA256
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ :=
-    let l := I.inputData.size
+    let l := I.calldata.size
     let ceil := ( l + 31 ) / 32
     60 + 12 * ceil
 
@@ -70,7 +70,7 @@ def Ξ_SHA256
     (false, ∅, ⟨0⟩, A, .empty)
   else
     let o :=
-      match ffi.SHA256 I.inputData with
+      match ffi.SHA256 I.calldata with
         | .ok s => s
         | .error e =>
           dbg_trace s!"Ξ_SHA56 failed: {e}"
@@ -78,15 +78,15 @@ def Ξ_SHA256
     (true, σ, g - .ofNat gᵣ, A, o)
 
 def Ξ_RIP160
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ :=
-    let l := I.inputData.size
+    let l := I.calldata.size
     let ceil := ( l + 31 ) / 32
     600 + 120 * ceil
 
@@ -94,7 +94,7 @@ def Ξ_RIP160
     (false, ∅, ⟨0⟩, A, .empty)
   else
     let o :=
-      match RIP160 I.inputData with
+      match RIP160 I.calldata with
         | .ok s => s
         | .error e =>
           dbg_trace s!"Ξ_RIP160 failed: {e}"
@@ -102,22 +102,22 @@ def Ξ_RIP160
     (true, σ, g - .ofNat gᵣ, A, o)
 
 def Ξ_ID
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ :=
-    let l := I.inputData.size
+    let l := I.calldata.size
     let ceil := ( l + 31 ) / 32
     15 + 3 * ceil
 
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let o := I.inputData
+    let o := I.calldata
     (true, σ, g - .ofNat gᵣ, A, o)
 
 def nat_of_slice
@@ -140,14 +140,14 @@ def expModAux (m : ℕ) (a : ℕ) (c : ℕ) : ℕ → ℕ
 def expMod (m : ℕ) (b : UInt256) (n : ℕ) : ℕ := expModAux m 1 b.toNat n
 
 def Ξ_EXPMOD
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let data := I.inputData
+  let data := I.calldata
   let base_length := nat_of_slice data 0 32
   let exp_length := nat_of_slice data 32 32
   let modulus_length := nat_of_slice data 64 32
@@ -202,8 +202,8 @@ private def expmodOutput :=
       default
       ⟨3000⟩
       default
-      { (default : ExecutionEnv) with
-        inputData := l_B ++ l_E ++ l_M ++ B ++ E ++ M
+      { (default : ExecutionEnv .EVM) with
+        calldata := l_B ++ l_E ++ l_M ++ B ++ E ++ M
       }
   o
  where
@@ -215,19 +215,19 @@ private def expmodOutput :=
   M : ByteArray := ⟨#[100]⟩
 
 def Ξ_BN_ADD
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ := 150
 
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let d := I.inputData
+    let d := I.calldata
     let x := (d.readBytes 0 32, d.readBytes 32 32)
     let y := (d.readBytes 64 32, d.readBytes 96 32)
     let o := BN_ADD x.1 x.2 y.1 y.2
@@ -244,8 +244,8 @@ private def bn_addOutput₀ :=
       default
       ⟨3000⟩
       default
-      { (default : ExecutionEnv) with
-        inputData := x₁ ++ y₁ ++ x₂ ++ y₂
+      { (default : ExecutionEnv .EVM) with
+        calldata := x₁ ++ y₁ ++ x₂ ++ y₂
       }
   o
  where
@@ -260,8 +260,8 @@ private def bn_addOutput₁ :=
       default
       ⟨3000⟩
       default
-      { (default : ExecutionEnv) with
-        inputData := bn_addOutput₀ ++ x ++ y
+      { (default : ExecutionEnv .EVM) with
+        calldata := bn_addOutput₀ ++ x ++ y
       }
   o
  where
@@ -269,19 +269,19 @@ private def bn_addOutput₁ :=
   y : ByteArray := UInt256.toByteArray ⟨2⟩
 
 def Ξ_BN_MUL
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
   let gᵣ : ℕ := 6000
 
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)
   else
-    let d := I.inputData
+    let d := I.calldata
     let x := (d.readBytes 0 32, d.readBytes 32 32)
     let n := d.readBytes 64 32
     let o := BN_MUL x.1 x.2 n
@@ -298,8 +298,8 @@ private def bn_mulOutput :=
       default
       ⟨100000⟩
       default
-      { (default : ExecutionEnv) with
-        inputData := x₁ ++ y₁ ++ n
+      { (default : ExecutionEnv .EVM) with
+        calldata := x₁ ++ y₁ ++ n
       }
   o
  where
@@ -308,14 +308,14 @@ private def bn_mulOutput :=
   n  : ByteArray := UInt256.toByteArray ⟨2⟩
 
 def Ξ_SNARKV
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let d := I.inputData
+  let d := I.calldata
   let k := d.size / 192
   let gᵣ : ℕ := 34000 * k + 45000
 
@@ -335,8 +335,8 @@ private def snarkvOutput :=
       default
       ⟨100000⟩
       default
-      { (default : ExecutionEnv) with
-        inputData := x ++ y ++ ffi.ByteArray.zeroes ⟨32 * 4⟩
+      { (default : ExecutionEnv .EVM) with
+        calldata := x ++ y ++ ffi.ByteArray.zeroes ⟨32 * 4⟩
       }
   o
  where
@@ -344,14 +344,14 @@ private def snarkvOutput :=
   y : ByteArray := UInt256.toByteArray ⟨2⟩
 
 def Ξ_BLAKE2_F
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let d := I.inputData
+  let d := I.calldata
   let gᵣ : ℕ := fromByteArrayBigEndian (d.extract 0 4)
 
   if g.toNat < gᵣ then
@@ -366,14 +366,14 @@ def Ξ_BLAKE2_F
         (false, ∅, ⟨0⟩, A, .empty)
 
 def Ξ_PointEval
-  (σ : AccountMap)
+  (σ : AccountMap .EVM)
   (g : UInt256)
   (A : Substate)
-  (I : ExecutionEnv)
+  (I : ExecutionEnv .EVM)
     :
-  (Bool × AccountMap × UInt256 × Substate × ByteArray)
+  (Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
 :=
-  let d := I.inputData
+  let d := I.calldata
   let gᵣ : ℕ := 50000
 
   if g.toNat < gᵣ then
