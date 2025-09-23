@@ -950,7 +950,6 @@ def stateEg₂ : Yul.State :=
   Yul.State.Ok {stateEg₁.toSharedState with executionEnv := {stateEg₁.toSharedState.executionEnv with codeOwner := caller2Address, perm := true}} Inhabited.default
   
 def test₂ :=
-  dbg_trace s!"stateEg₂: {stateEg₂.toSharedState.executionEnv.codeOwner}"
   let expr : Expr := .Call (Sum.inr "fun_testStaticRetrieve") [.Lit ⟨42⟩]
   match (exec 99 (.ExprStmtCall expr) stateEg₂) with
   | .error e => repr e
