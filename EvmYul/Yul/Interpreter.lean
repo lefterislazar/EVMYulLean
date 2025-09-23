@@ -168,8 +168,8 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
       | .STATICCALL =>
         match args with
           | _ :: address_arg :: inOffset :: inSize :: outOffset :: outSize :: _ =>
+            if ¬s₀.executionEnv.perm then throw .StaticModeViolation
             let s₀Static : State := setStatic s₀ false
-            if ¬s₀Static.executionEnv.perm then throw .StaticModeViolation
             let address := AccountAddress.ofUInt256 address_arg
             let calldata₁ := s₀Static.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
           
