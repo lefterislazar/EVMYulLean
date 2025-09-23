@@ -116,7 +116,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                 }
                             let s₁ : State := .Ok sharedState₁ default
                             
-                            match callFromCode fuel₁ [] .none s₁ with
+                            match callDispatcher fuel₁ s₁ with
                             | .error (.YulHalt s₂ _) => 
                               let memory₃ := s₂.toMachineState.H_return.copySlice 0 s₀.toMachineState.memory outOffset.toNat (min outSize.toNat s₂.toMachineState.H_return.size)
                               match s₂ with
@@ -220,7 +220,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                   }
                               let s₁ : State := .Ok sharedState₁ default
                               
-                              match callFromCode fuel₁ [] .none s₁ with
+                              match callDispatcher fuel₁ s₁ with
                                 | .error (.YulHalt s₂ _) =>
                                     /- We note here that if:
                                       `outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) ≥ UInt256.size`
@@ -323,7 +323,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                 }
                             let s₁ : State := .Ok sharedState₁ default
                             
-                            match callFromCode fuel₁ [] .none s₁ with
+                            match callDispatcher fuel₁ s₁ with
                             | .error (.YulHalt s₂ _) =>
                               /- We note here that if:
                                     `outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) ≥ UInt256.size`
@@ -407,7 +407,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                             }
                         let s₁ : State := .Ok sharedState₁ default
                         
-                        match callFromCode fuel₁ [] .none s₁ with
+                        match callDispatcher fuel₁ s₁ with
                           | .error (.YulHalt s₂ _) =>
                               /- We note here that if:
                                 `outOffset.toNat + (min outSize.toNat s₂.toMachineState.H_return.size) ≥ UInt256.size`
@@ -501,28 +501,21 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                 .ok (s₃, List.map s₂.lookup! f.rets)
 
   /--
-    `callFromCode` executes a call of a user-defined function, running `executionEnv.code` rather than the code from `s.toSharedState.executionEnv.codeOwner`.
+    `callDispatcher` calls the dispatcher of an external contract.
     
-    Intended for use when calling an external contract.
+    It expects the `calldata` and `code` to be appropriately set.
   -/
-  def callFromCode (fuel : Nat) (args : List Literal) (yulFunctionNameOption : Option YulFunctionName) (s : State) : Except Yul.Exception (State × List Literal) :=
+  def callDispatcher (fuel : Nat) (s : State) : Except Yul.Exception (State × List Literal) :=
     match fuel with
       | 0 => .error .OutOfFuel
       | .succ fuel' =>
-          let fOpt : Option FunctionDefinition :=
-            match yulFunctionNameOption with
-              | .none => .some (FunctionDefinition.Def [] [] [s.executionEnv.code.dispatcher])
-              | .some yulFunctionName =>
-                  s.executionEnv.code.functions.lookup yulFunctionName
-          match fOpt with
-          | .none => .error (.MissingContractFunction (yulFunctionNameOption.getD ".none"))
-          | .some f =>
-            let s₁ := 👌 s.initcall f.params args
-            match exec fuel' (.Block f.body) s₁ with
-            | .error e => .error e
-            | .ok s₂ =>
-              let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
-              .ok (s₃, List.map s₂.lookup! f.rets)
+          let f := FunctionDefinition.Def [] [] [s.executionEnv.code.dispatcher]
+          let s₁ := 👌 s.initcall f.params []
+          match exec fuel' (.Block f.body) s₁ with
+          | .error e => .error e
+          | .ok s₂ =>
+            let s₃ := s₂.reviveJump.overwrite? s |>.setStore s
+            .ok (s₃, List.map s₂.lookup! f.rets)
 
   -- Safe to call `List.head!` on return values, because the compiler throws an
   -- error when coarity is > 0 in (1) and when coarity is > 1 in all other
