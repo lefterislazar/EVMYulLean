@@ -67,6 +67,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
     match fuel with
     | 0 => .error .OutOfFuel
     | .succ fuel₁ => 
+      if ¬s₀.executionEnv.perm ∧ prim ∈ [.CREATE, .CREATE2, .SSTORE, .SELFDESTRUCT, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4, .TSTORE] then throw .StaticModeViolation
       match prim with
       | .CALL =>
         match args with
