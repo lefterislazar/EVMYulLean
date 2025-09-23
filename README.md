@@ -63,3 +63,24 @@ lake test -- <NUM_THREADS> 2> out_discard.txt
 ```
 where `<NUM_THREADS>` is the number of threads running conformance tests in parallel. Note that the default is `1`.
 We recommend redirecting `stderr` into a file to not pollute the output.
+
+# Limitations of the Yul semantics
+
+## Fallback function from receiving ether
+
+- We do not run a the fallback function of a smart contract when it receives ether, such as being a recipient of ether in a `SELFDESTRUCT` of another contract.
+
+## Gas
+
+- We do not model gas in the Yul semantics, no fee is deducted.
+
+## Create
+
+- We do not model `create` or `create2` because Yul code is not stored as bytecode, and so we cannot properly model `create` or `create2` without some mechanism for correctly decompiling bytecode into Yul code, so we do not model this.
+- This case is caught by the the `_` in the match statement in `EVMYul/Semantics.lean` and returns `default`.
+- Instead of creating contracts, they should be manually included in the modelled blockchain state, in the `accountMap`. See `EvmYul/Yul/YulSemanticsTests/README.md` for more information on how to include custom Solidity contracts in the modelled blockchain state.
+
+## EXTCODESIZE
+
+- Not modelled, the current semantics raise an error. Solidity checks `extcodesize` and so generated Yul will not be able to call other contracts without removing or editing these `extcodesize` checks (manually).
+- In the `EvmYul/Yul/YulSemanticsTests.lean` we manually changed `let _1 := extcodesize( 2)` to `let _1 := 1` in `fun_testStoreAndRetrieveExternal`.
