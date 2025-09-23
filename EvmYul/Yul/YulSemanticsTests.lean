@@ -521,6 +521,8 @@ end EvmYul
 
 open EvmYul.Yul
 
+-- Run this test via `lake exe yulSemanticsTests`.
+-- `#eval` cannot run the test because it uses the foreign function interface for `ByteArray.zeroes`.
 def main : IO Unit := do
   IO.println s!"test₁: {test₁}"
   -- IO.println s!"Test 3: {stateEg₁.toSharedState.accountMap.toList.map (fun a => repr a.1 ++ " " ++ repr a.2.storage.toList)}"
