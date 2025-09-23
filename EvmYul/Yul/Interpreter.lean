@@ -660,6 +660,7 @@ def execTopLevel (fuel : Nat) (stmt : Stmt) (s : State) : State :=
     | .error (.MissingContractFunction _) => default -- We do not model fallback functions
     | .error .InvalidExpression => default
     | .error .YulEXTCODESIZENotImplemented => default
+    | .error .Revert => s
     | .error (.YulHalt s _) => s
     | .ok s => s
 

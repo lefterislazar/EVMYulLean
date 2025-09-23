@@ -14,6 +14,7 @@ inductive Exception where
   | MissingContractFunction (s : String)          : Exception
   | InvalidExpression                             : Exception
   | YulEXTCODESIZENotImplemented                  : Exception
+  | Revert                                        : Exception
   | YulHalt (state : Yul.State) (value : UInt256) : Exception
   -- | StopInvoked        : Exception
 
@@ -29,6 +30,7 @@ instance : Repr Exception where
       | .MissingContractFunction f => "MissingContractFunction: " ++ f
       | .InvalidExpression => "InvalidExpression"
       | .YulEXTCODESIZENotImplemented => "YulEXTCODESIZENotImplemented"
+      | .Revert => "Revert"
       | .YulHalt _ _ => "YulHalt: (holds a state and a value)"
 
 

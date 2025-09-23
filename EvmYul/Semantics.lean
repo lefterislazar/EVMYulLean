@@ -215,18 +215,18 @@ def swap (n : ℕ) : Transformer .EVM :=
   else
     .error .StackUnderflow
 
--- TODO: Yul halting for `SELFDESTRUCT`, `RETURN`, `REVERT`, `STOP`
+-- TODO: Yul halting for `SELFDESTRUCT`
 def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat) := .none) : Transformer τ := Id.run do
   let _ : Id Unit := -- For debug logging
     match τ with
       | .EVM => dbg_trace op.pretty; pure ()
       | .Yul => dbg_trace op.pretty; pure ()
   match τ, op with
-    -- TODO: Revisit STOP, this is likely not the best way to do it and the Yul version is WIP.
+    -- TODO: Revisit STOP, this is likely not the best way to do it.
     | τ, .STOP =>
       match τ with
         | .EVM => λ evmState ↦ .ok <| {evmState with toMachineState := evmState.toMachineState.setReturnData .empty}
-        | .Yul => λ yulState _ ↦ .ok (yulState, none)
+        | .Yul => λ yulState _ ↦ .error (Yul.Exception.YulHalt yulState ⟨0⟩)
     | τ, .ADD =>
       dispatchBinary τ UInt256.add
     | τ, .MUL =>
@@ -387,7 +387,11 @@ def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat)
         match (dispatchBinaryMachineStateOp .Yul MachineState.evmReturn) yulState lits with
           | .error e => .error e
           | .ok (s, v) => .error (Yul.Exception.YulHalt s (v.getD ⟨1⟩))
-    | τ, .REVERT => dispatchBinaryMachineStateOp τ MachineState.evmRevert
+    | .EVM, .REVERT => dispatchBinaryMachineStateOp .EVM MachineState.evmRevert
+    | .Yul, .REVERT => λ yulState lits ↦ 
+        match (dispatchBinaryMachineStateOp .Yul MachineState.evmRevert) yulState lits with
+          | .error e => .error e
+          | .ok (_, _) => .error (Yul.Exception.Revert)
     | .EVM, .SELFDESTRUCT =>
       λ evmState ↦
         match evmState.stack.pop with
