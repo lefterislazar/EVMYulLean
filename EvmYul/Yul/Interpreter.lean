@@ -206,10 +206,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                             | .OutOfFuel => .error .OutOfFuel
                             | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                             | .Ok sharedState₂ _ =>
+                              -- Restore ExecutionEnv
+                              let executionEnv₃ := { sharedState₂.executionEnv with
+                                                    calldata := default,
+                                                    code := s₀.toSharedState.executionEnv.code,
+                                                    codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                    source := s₀.executionEnv.source,
+                                                    weiValue := s₀.executionEnv.weiValue,
+                                                }
                               let sharedState₃ := { sharedState₂ with
                                                       memory := memory₃,
                                                       returnData := s₂.toMachineState.H_return,
-                                                      H_return := ByteArray.empty
+                                                      H_return := ByteArray.empty,
+                                                      executionEnv := executionEnv₃
                                                   }
                               .ok (setStatic (.Ok sharedState₃ varstore) s₀.toSharedState.executionEnv.perm, [⟨1⟩])
                           | .error e => .error e
@@ -220,10 +229,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                             | .OutOfFuel => .error .OutOfFuel
                             | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                             | .Ok sharedState₂ _ =>
+                              -- Restore ExecutionEnv
+                              let executionEnv₃ := { sharedState₂.executionEnv with
+                                                    calldata := default,
+                                                    code := s₀.toSharedState.executionEnv.code,
+                                                    codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                    source := s₀.executionEnv.source,
+                                                    weiValue := s₀.executionEnv.weiValue,
+                                                }
                               let sharedState₃ := { sharedState₂ with
                                                       memory := memory₃,
                                                       returnData := s₂.toMachineState.H_return,
-                                                      H_return := ByteArray.empty
+                                                      H_return := ByteArray.empty,
+                                                      executionEnv := executionEnv₃
                                                   }
                               .ok (setStatic (.Ok sharedState₃ varstore) s₀.toSharedState.executionEnv.perm, [⟨1⟩])
           | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
@@ -271,10 +289,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                               | .OutOfFuel => .error .OutOfFuel
                               | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                               | .Ok sharedState₂ _ =>
+                                -- Restore ExecutionEnv
+                                let executionEnv₃ := { sharedState₂.executionEnv with
+                                                    calldata := default,
+                                                    code := s₀.toSharedState.executionEnv.code,
+                                                    codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                    source := s₀.executionEnv.source,
+                                                    weiValue := s₀.executionEnv.weiValue,
+                                                }
                                 let sharedState₃ := { sharedState₂ with
                                                         memory := memory₃,
                                                         returnData := s₂.toMachineState.H_return,
-                                                        H_return := ByteArray.empty
+                                                        H_return := ByteArray.empty,
+                                                        executionEnv := executionEnv₃
                                                     }
                                 .ok (.Ok sharedState₃ varstore, [⟨1⟩])
 
@@ -285,10 +312,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                               | .OutOfFuel => .error .OutOfFuel
                               | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                               | .Ok sharedState₂ _ =>
+                                -- Restore ExecutionEnv
+                                let executionEnv₃ := { sharedState₂.executionEnv with
+                                                    calldata := default,
+                                                    code := s₀.toSharedState.executionEnv.code,
+                                                    codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                    source := s₀.executionEnv.source,
+                                                    weiValue := s₀.executionEnv.weiValue,
+                                                }
                                 let sharedState₃ := { sharedState₂ with
                                                         memory := memory₃,
                                                         returnData := s₂.toMachineState.H_return,
-                                                        H_return := ByteArray.empty
+                                                        H_return := ByteArray.empty,
+                                                        executionEnv := executionEnv₃
                                                     }
                                 .ok (.Ok sharedState₃ varstore, [⟨1⟩])
           | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
@@ -327,10 +363,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                           | .OutOfFuel => .error .OutOfFuel
                           | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                           | .Ok sharedState₂ _ =>
+                            -- Restore ExecutionEnv
+                            let executionEnv₃ := { sharedState₂.executionEnv with
+                                                    calldata := default,
+                                                    code := s₀.toSharedState.executionEnv.code,
+                                                    codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                    source := s₀.executionEnv.source,
+                                                    weiValue := s₀.executionEnv.weiValue,
+                                                }
                             let sharedState₃ := { sharedState₂ with
                                                     memory := memory₃,
                                                     returnData := s₂.toMachineState.H_return,
-                                                    H_return := ByteArray.empty
+                                                    H_return := ByteArray.empty,
+                                                    executionEnv := executionEnv₃
                                                 }
                             .ok (.Ok sharedState₃ varstore, [⟨1⟩])
                         | .error e => .error e
@@ -340,10 +385,19 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                           | .OutOfFuel => .error .OutOfFuel
                           | .Checkpoint j => .ok (.Checkpoint j, [⟨0⟩])
                           | .Ok sharedState₂ _ =>
+                            -- Restore ExecutionEnv
+                            let executionEnv₃ := { sharedState₂.executionEnv with
+                                                    calldata := default,
+                                                    code := s₀.toSharedState.executionEnv.code,
+                                                    codeOwner := s₀.toSharedState.executionEnv.codeOwner,
+                                                    source := s₀.executionEnv.source,
+                                                    weiValue := s₀.executionEnv.weiValue,
+                                                }
                             let sharedState₃ := { sharedState₂ with
                                                     memory := memory₃,
                                                     returnData := s₂.toMachineState.H_return,
-                                                    H_return := ByteArray.empty
+                                                    H_return := ByteArray.empty,
+                                                    executionEnv := executionEnv₃
                                                 }
                             .ok (.Ok sharedState₃ varstore, [⟨1⟩])
           | _ => .error .InvalidArguments -- Incorrect number of arguments, this case should be impossible if the Yul code is parsed correctly. Guaranteed by the compiler.
