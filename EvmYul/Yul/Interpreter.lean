@@ -509,7 +509,11 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
             | .error e => .error e
             | .ok s₃ =>
               .ok ((val, .error (.YulHalt s₂ v)) :: s₃)
-          | .error e => .error e
+          | .error e =>
+              match execSwitchCases fuel' s cases' with
+              | .error e => .error e
+              | .ok s₃ =>
+                .ok ((val, .error e) :: s₃)
           | .ok s₂ =>
             match execSwitchCases fuel' s cases' with
             | .error e => .error e
