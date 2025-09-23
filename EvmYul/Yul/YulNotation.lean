@@ -194,6 +194,7 @@ def parseFunction : String → PrimOp ⊕ Identifier
   | "call" => .inl .CALL
   | "staticcall" => .inl .STATICCALL
   | "delegatecall" => .inl .DELEGATECALL
+  | "callcode" => .inl .CALLCODE
   -- | "loadimmutable" => .inl  .LOADI
   -- | "log0" => .inl .LOG0
   | "log1" => .inl .LOG1
