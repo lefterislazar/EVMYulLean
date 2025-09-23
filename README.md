@@ -70,7 +70,7 @@ To execute the Yul semantics tests run:
 
 `lake exe yulSemanticsTests`
 
-These tests are definied in `EvmYul/Yul/YulSemanticsTests/Main.lean`.
+These tests are defined in `EvmYul/Yul/YulSemanticsTests/Main.lean`.
 
 # Limitations of the Yul semantics
 
