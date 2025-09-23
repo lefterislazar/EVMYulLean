@@ -77,19 +77,19 @@ abbrev contractCode (τ : OperationType) :=
     | OperationType.Yul => YulContract
 
 instance {τ} : BEq (contractCode τ) where
-  beq a b := (match τ with
+  beq a b := match τ with
               | .EVM => a == b
-              | .Yul => a == b)
+              | .Yul => a == b
 
 instance {τ} : Inhabited (contractCode τ) where
-  default := (match τ with
+  default := match τ with
                 | .EVM => default
-                | .Yul => default)
+                | .Yul => default
               
 instance {τ} : Repr (contractCode τ) where
-  reprPrec a _ := (match τ with
+  reprPrec a _ := match τ with
                      | .EVM => reprPrec a 0
-                     | .Yul => reprPrec a 0)
+                     | .Yul => reprPrec a 0
 
 
 namespace FunctionDefinition
