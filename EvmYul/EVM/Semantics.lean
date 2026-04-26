@@ -1,5 +1,5 @@
 import Mathlib.Data.BitVec
-import Mathlib.Data.Array.Defs
+import Mathlib.Init
 import Mathlib.Data.Finmap
 import Mathlib.Data.List.Defs
 import EvmYul.Data.Stack
@@ -217,6 +217,7 @@ def call (fuel : Nat)
         result with toMachineState := μ'incomplete
       }
       .ok (x, result)
+termination_by fuel
 
 def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option (UInt256 × Nat)) := .none)
   : EVM.Transformer
@@ -422,6 +423,7 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         let evmState' := state'.replaceStackAndIncrPC μ'ₛ
         .ok evmState'
       | instr => EvmYul.step instr arg {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
+termination_by fuel
 
 /--
   Iterative progression of `step`
@@ -440,6 +442,12 @@ def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
         (w = .CALL ∧ s[2]? ≠ some ⟨0⟩)
       -- Exceptional halting (158)
       let Z (evmState : State) : Except EVM.ExecutionException (State × ℕ) := do
+        if δ w = none then
+          .error .InvalidInstruction
+
+        if evmState.stack.length < (δ w).getD 0 then
+          .error .StackUnderflow
+
         let cost₁ := memoryExpansionCost evmState w
         if evmState.gasAvailable.toNat < cost₁ then
           .error .OutOfGass
@@ -449,12 +457,6 @@ def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
 
         if evmState.gasAvailable.toNat < cost₂ then
           .error .OutOfGass
-
-        if δ w = none then
-          .error .InvalidInstruction
-
-        if evmState.stack.length < (δ w).getD 0 then
-          .error .StackUnderflow
 
         let invalidJump := notIn evmState.stack[0]? validJumps
 
@@ -512,6 +514,7 @@ def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
                 .ok <| .revert evmState'.gasAvailable o
               else
                 .ok <| .success evmState' o
+termination_by fuel
  where
   belongs (o : Option UInt256) (l : Array UInt256) : Bool :=
     match o with
@@ -558,6 +561,7 @@ def Ξ -- Type `Ξ` using `\GX` or `\Xi`
           let finalGas := evmState'.gasAvailable
           .ok (ExecutionResult.success (evmState'.createdAccounts, evmState'.accountMap, finalGas, evmState'.substate) o)
         | .revert g' o => .ok (ExecutionResult.revert g' o)
+termination_by fuel
 
 def Lambda
   (fuel : ℕ)
@@ -685,6 +689,7 @@ def Lambda
       -- (117)
       let z := not F
       .ok (a, createdAccounts', σ', .ofNat g', A', z, .empty) -- (93)
+termination_by fuel
  where
   L_A (s : AccountAddress) (n : UInt256) (ζ : Option ByteArray) (i : ByteArray) :
     Option ByteArray
@@ -745,7 +750,7 @@ def Θ (fuel : Nat)
   let σ'₁ :=
     match σ.find? r with
       | none =>
-        if v != ⟨0⟩ then
+        if v != UInt256.ofNat 0 then
           σ.insert r { (default : Account .EVM) with balance := v}
         else
           σ
@@ -813,6 +818,7 @@ def Θ (fuel : Nat)
 
   -- Equation (119)
   .ok (createdAccounts, σ', g', A', z, out)
+termination_by fuel
 
 end
 
@@ -935,7 +941,7 @@ def Υ (fuel : ℕ)
 
   let beneficiaryFee := (T.base.gasLimit - gStar) * f
   let σStar' :=
-    if beneficiaryFee != ⟨0⟩ then
+    if beneficiaryFee != UInt256.ofNat 0 then
       σStar.increaseBalance .EVM H.beneficiary beneficiaryFee
     else σStar
   let σ' := A.selfDestructSet.1.foldl Batteries.RBMap.erase σStar' -- (87)

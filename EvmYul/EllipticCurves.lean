@@ -16,8 +16,9 @@ def blobECDSARECOVER (e v r s : String) : String :=
   }
 
 def blobSign (e pᵣ : String) : List String :=
-  (String.split · Char.isWhitespace) ∘ totallySafePerformIO ∘ IO.Process.run <|
-    pythonCommandOfInput e pᵣ
+  let output := totallySafePerformIO <| IO.Process.run <| pythonCommandOfInput e pᵣ
+  let chunks : List String.Slice := (output.split Char.isWhitespace).toList
+  chunks.map String.Slice.toString
   where pythonCommandOfInput (e pᵣ : String) : IO.Process.SpawnArgs := {
     cmd := "python3",
     args := #["EvmYul/EllipticCurvesPy/sign.py", e, pᵣ]

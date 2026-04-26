@@ -2,7 +2,7 @@ import Lake
 open Lake DSL System
 
 require mathlib from git
-  "https://github.com/leanprover-community/mathlib4.git"@"v4.22.0"
+  "https://github.com/leanprover-community/mathlib4.git"@"v4.29.0"
 
 package «evmyul» {
   moreLeanArgs := #["-DautoImplicit=false"]
@@ -61,7 +61,7 @@ extern_lib libleanffi pkg := do
     discard <| IO.Process.run {cmd := "git", args := #["submodule", "update", "--init"]}
 
   let name := nameToStaticLib "leanffi"
-  buildStaticLib (pkg.nativeLibDir / name) #[sha256O, keccak256, ffiO]
+  buildStaticLib (pkg.staticLibDir / name) #[sha256O, keccak256, ffiO]
 
 lean_lib «Conform»
 
