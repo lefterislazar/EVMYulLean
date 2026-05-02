@@ -14,6 +14,7 @@ import EvmYul.State.TransactionOps
 
 import EvmYul.EVM.Exception
 import EvmYul.EVM.Gas
+import EvmYul.EVM.GasPositive
 import EvmYul.EVM.GasConstants
 import EvmYul.EVM.State
 import EvmYul.EVM.StateOps
@@ -136,20 +137,886 @@ def swap (n : ℕ) : Transformer :=
 local instance : MonadLift Option (Except EVM.ExecutionException) :=
   ⟨Option.option (.error .StackUnderflow) .ok⟩
 
+def call_termination
+  (gas recipient t value : UInt256)
+  (evmState : State)
+:= UInt256.ofNat
+    (Ccallgas (AccountAddress.ofUInt256 t) (AccountAddress.ofUInt256 recipient) value gas evmState.accountMap
+      evmState.toMachineState evmState.substate)
+        < evmState.gasAvailable
+
+def step_termination (gasCost : Nat) (instr : Operation .EVM) (evmState : State) :=
+  match instr with
+  | .CREATE => UInt256.ofNat (L (evmState.gasAvailable - UInt256.ofNat gasCost).toNat) < evmState.gasAvailable
+  | .CREATE2 => UInt256.ofNat (L (evmState.gasAvailable - UInt256.ofNat gasCost).toNat) < evmState.gasAvailable
+  | .CALL =>
+    match evmState.stack with
+    | μ₀ :: μ₁ :: μ₂ :: _ =>
+      call_termination μ₀ μ₁ μ₁ μ₂ evmState ∧
+        Ccallgas (AccountAddress.ofUInt256 μ₁) (AccountAddress.ofUInt256 μ₁) μ₂ μ₀
+          evmState.accountMap evmState.toMachineState evmState.substate < gasCost
+    | _ => True
+  | .CALLCODE =>
+    match evmState.stack with
+    | μ₀ :: μ₁ :: μ₂ :: _ =>
+      call_termination μ₀ (UInt256.ofNat ↑evmState.executionEnv.codeOwner) μ₁ μ₂ evmState ∧
+        Ccallgas (AccountAddress.ofUInt256 μ₁) evmState.executionEnv.codeOwner μ₂ μ₀
+          evmState.accountMap evmState.toMachineState evmState.substate < gasCost
+    | _ => True
+  | .DELEGATECALL =>
+    match evmState.stack with
+    | μ₀ :: μ₁ :: _ =>
+      call_termination μ₀ (UInt256.ofNat ↑evmState.executionEnv.codeOwner) μ₁ { val := 0 } evmState ∧
+        Ccallgas (AccountAddress.ofUInt256 μ₁) evmState.executionEnv.codeOwner { val := 0 } μ₀
+          evmState.accountMap evmState.toMachineState evmState.substate < gasCost
+    | _ => True
+  | .STATICCALL =>
+    match evmState.stack with
+    | μ₀ :: μ₁ :: _ =>
+      call_termination μ₀ μ₁ μ₁ { val := 0 } evmState ∧
+        Ccallgas (AccountAddress.ofUInt256 μ₁) (AccountAddress.ofUInt256 μ₁) { val := 0 } μ₀
+          evmState.accountMap evmState.toMachineState evmState.substate < gasCost
+    | _ => True
+  | _ => True
+
+structure StepResult (gasCost : Nat) (evmState : State) where
+  state : State
+  gas_le :
+    gasCost ≤ evmState.gasAvailable.toNat →
+    state.gasAvailable ≤ evmState.gasAvailable
+  gas_lt :
+    0 < gasCost →
+    gasCost ≤ evmState.gasAvailable.toNat →
+    state.gasAvailable < evmState.gasAvailable
+
+structure CallResult (gasCost : Nat) (evmState : State) where
+  x : UInt256
+  state : State
+  gas_le :
+    gasCost ≤ evmState.gasAvailable.toNat →
+    state.gasAvailable ≤ evmState.gasAvailable
+  gas_lt :
+    0 < gasCost →
+    gasCost ≤ evmState.gasAvailable.toNat →
+    state.gasAvailable < evmState.gasAvailable
+
+def ExecutionResult.gasAvailable : ExecutionResult State → UInt256
+  | .success s _ => s.gasAvailable
+  | .revert g _ => g
+
+structure XResult (gasBound : UInt256) where
+  result : ExecutionResult State
+  gas_le : result.gasAvailable ≤ gasBound
+
+def ExecutionResult.xiGasAvailable :
+    ExecutionResult (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate) →
+      UInt256
+  | .success (_, _, g, _) _ => g
+  | .revert g _ => g
+
+structure XiResult (g : UInt256) where
+  result : ExecutionResult (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate)
+  gas_le : result.xiGasAvailable ≤ g
+
+structure LambdaResult (g : UInt256) where
+  address : AccountAddress
+  createdAccounts : Batteries.RBSet AccountAddress compare
+  accountMap : AccountMap .EVM
+  gas : UInt256
+  substate : Substate
+  success : Bool
+  output : ByteArray
+  gas_le : gas ≤ g
+
+structure ThetaResult (g : UInt256) where
+  createdAccounts : Batteries.RBSet AccountAddress compare
+  accountMap : AccountMap .EVM
+  gas : UInt256
+  substate : Substate
+  success : Bool
+  output : ByteArray
+  gas_le : gas ≤ g
+
+structure CreateSubResult (gasLimit : Nat) where
+  address : AccountAddress
+  state : State
+  gas : UInt256
+  success : Bool
+  output : ByteArray
+  gas_toNat_le : gas.toNat ≤ gasLimit
+
+structure CallSubResult (gasLimit : Nat) where
+  createdAccounts : Batteries.RBSet AccountAddress compare
+  accountMap : AccountMap .EVM
+  gas : UInt256
+  substate : Substate
+  success : Bool
+  output : ByteArray
+  gas_le : gas ≤ UInt256.ofNat gasLimit
+
+def ThetaResult.ofPrecompile (g : UInt256) (createdAccounts : Batteries.RBSet AccountAddress compare)
+    (r : Bool × AccountMap .EVM × UInt256 × Substate × ByteArray)
+    (hgas : r.2.2.1 ≤ g) : ThetaResult g :=
+  { createdAccounts := createdAccounts
+    accountMap := r.2.1
+    gas := r.2.2.1
+    substate := r.2.2.2.1
+    success := r.1
+    output := r.2.2.2.2
+    gas_le := hgas
+  }
+
+theorem sizeOf_UInt256_le : ∀ (a b : UInt256), a < b → sizeOf a < sizeOf b := by
+  intros
+  simp [sizeOf, UInt256._sizeOf_1, Fin._sizeOf_1]
+  simpa 
+
+lemma UInt256.ofNat_lt_of_lt_toNat {n : Nat} {u : UInt256} (h : n < u.toNat) :
+    UInt256.ofNat n < u := by
+  unfold LT.lt UInt256.instLT
+  simp only [UInt256.ofNat, Id.run]
+  change (Fin.ofNat UInt256.size n).val < u.val.val
+  simp only [Fin.val_ofNat]
+  have h' : n < u.val.val := h
+  rw [Nat.mod_eq_of_lt (Nat.lt_trans h' u.val.isLt)]
+  exact h'
+
+lemma UInt256.ofNat_le_of_le_toNat {n : Nat} {u : UInt256} (h : n ≤ u.toNat) :
+    UInt256.ofNat n ≤ u := by
+  unfold LE.le UInt256.instLE
+  simp only [UInt256.ofNat, Id.run]
+  change (Fin.ofNat UInt256.size n).val ≤ u.val.val
+  simp only [Fin.val_ofNat]
+  have hn : n < UInt256.size := Nat.lt_of_le_of_lt h u.val.isLt
+  rw [Nat.mod_eq_of_lt hn]
+  exact h
+
+lemma UInt256.toNat_le_of_le_ofNat {u : UInt256} {n : Nat}
+    (h : u ≤ UInt256.ofNat n) (hn : n < UInt256.size) :
+    u.toNat ≤ n := by
+  unfold LE.le UInt256.instLE at h
+  change u.val.val ≤ (Fin.ofNat UInt256.size n).val at h
+  simp only [Fin.val_ofNat] at h
+  simpa [UInt256.toNat, UInt256.ofNat, Id.run, Nat.mod_eq_of_lt hn] using h
+
+lemma UInt256.lt_of_le_of_ne' {a b : UInt256} (hle : a ≤ b) (hne : a ≠ b) :
+      a < b := by
+    unfold LE.le UInt256.instLE at hle
+    unfold LT.lt UInt256.instLT
+    apply lt_of_le_of_ne hle
+    intro hv
+    apply hne
+    cases a
+    cases b
+    simp at hv
+    subst hv
+    rfl
+
+lemma UInt256.toNat_sub_ofNat_of_le {a : UInt256} {n : Nat} (h : n ≤ a.toNat) :
+    (a - UInt256.ofNat n).toNat = a.toNat - n := by
+  have hn : n < UInt256.size := Nat.lt_of_le_of_lt h a.val.isLt
+  change (UInt256.sub a (UInt256.ofNat n)).toNat = a.toNat - n
+  unfold UInt256.sub UInt256.toNat UInt256.ofNat
+  simp only [Id.run]
+  rw [Fin.sub_val_of_le]
+  · simp [Nat.mod_eq_of_lt hn]
+  · change (Fin.ofNat UInt256.size n).val ≤ a.val.val
+    simp [Nat.mod_eq_of_lt hn]
+    exact h
+
+lemma UInt256.sub_ofNat_lt_of_pos_le {a : UInt256} {n : Nat}
+    (hpos : 0 < n) (hle : n ≤ a.toNat) :
+    a - UInt256.ofNat n < a := by
+  unfold LT.lt UInt256.instLT
+  change (a - UInt256.ofNat n).toNat < a.toNat
+  rw [UInt256.toNat_sub_ofNat_of_le hle]
+  omega
+
+lemma UInt256.sub_ofNat_le {a : UInt256} {n : Nat} (hle : n ≤ a.toNat) :
+    a - UInt256.ofNat n ≤ a := by
+  unfold LE.le UInt256.instLE
+  change (a - UInt256.ofNat n).toNat ≤ a.toNat
+  rw [UInt256.toNat_sub_ofNat_of_le hle]
+  omega
+
+lemma UInt256.le_trans' {a b c : UInt256} (hab : a ≤ b) (hbc : b ≤ c) : a ≤ c := by
+  unfold LE.le UInt256.instLE at *
+  omega
+
+lemma UInt256.le_lt_trans' {a b c : UInt256} (hab : a ≤ b) (hbc : b < c) : a < c := by
+  unfold LE.le UInt256.instLE at hab
+  unfold LT.lt UInt256.instLT at *
+  omega
+
+lemma UInt256.toNat_le_of_le {a b : UInt256} (h : a ≤ b) : a.toNat ≤ b.toNat := by
+  unfold LE.le UInt256.instLE at h
+  exact h
+
+lemma UInt256.zero_le (a : UInt256) : ({ val := 0 } : UInt256) ≤ a := by
+  change (0 : Fin UInt256.size) ≤ a.val
+  exact Nat.zero_le _
+
+lemma UInt256.add_le_of_toNat_add_le {a b c : UInt256}
+    (h : a.toNat + b.toNat ≤ c.toNat) : a + b ≤ c := by
+  unfold LE.le UInt256.instLE UInt256.toNat at *
+  have hsum_lt : a.val.val + b.val.val < UInt256.size := Nat.lt_of_le_of_lt h c.val.isLt
+  change (UInt256.add a b).val.val ≤ c.val.val
+  unfold UInt256.add
+  rw [Fin.val_add]
+  simp [Nat.mod_eq_of_lt hsum_lt]
+  exact h
+
+lemma UInt256.add_lt_of_toNat_add_lt {a b c : UInt256}
+    (h : a.toNat + b.toNat < c.toNat) : a + b < c := by
+  unfold LT.lt UInt256.instLT UInt256.toNat at *
+  have hsum_lt : a.val.val + b.val.val < UInt256.size := Nat.lt_trans h c.val.isLt
+  change (UInt256.add a b).val.val < c.val.val
+  unfold UInt256.add
+  rw [Fin.val_add]
+  simp [Nat.mod_eq_of_lt hsum_lt]
+  exact h
+
+lemma UInt256.succ_bne_zero (i : Fin (UInt256.size - 1)) :
+    (({ val := i.succ } : UInt256) != ({ val := 0 } : UInt256)) = true := by
+  have hne : ({ val := i.succ } : UInt256) ≠ ({ val := 0 } : UInt256) := by
+    intro h
+    have hv := congrArg UInt256.val h
+    have hvn := congrArg Fin.val hv
+    simp at hvn
+  unfold bne
+  cases hbeq : (({ val := i.succ } : UInt256) == ({ val := 0 } : UInt256))
+  · rfl
+  · exact False.elim (hne (beq_iff_eq.mp hbeq))
+
+lemma Ccallgas_lt_Ccall (t r val g σ μ A) :
+    Ccallgas t r val g σ μ A < Ccall t r val g σ μ A := by
+  by_cases hval : val = ({ val := 0 } : UInt256)
+  · subst val
+    unfold Ccall Ccallgas Cextra Cxfer Cnew Caccess
+    simp [bne, GasConstants.Gwarmaccess, GasConstants.Gcoldaccountaccess]
+    split
+    · split <;> omega
+    · rename_i hneq
+      exact False.elim (hneq rfl)
+  · have hbne : (val != ({ val := 0 } : UInt256)) = true := by
+      simp [bne, hval]
+    unfold Ccall Ccallgas Cextra Cxfer Cnew Caccess
+    simp [hbne, GasConstants.Gwarmaccess, GasConstants.Gcoldaccountaccess,
+      GasConstants.Gcallvalue, GasConstants.Gcallstipend, GasConstants.Gnewaccount]
+    split <;> omega
+
+lemma L_lt_of_pos {n c : Nat} (hc : 0 < c) (hle : c ≤ n) : L (n - c) < n := by
+  unfold L
+  omega
+
+lemma L_le_self (n : Nat) : L n ≤ n := by
+  unfold L
+  omega
+
+lemma create_refund_gas_le_charged {charged g : UInt256}
+    (hg : g.toNat ≤ L charged.toNat) :
+    UInt256.ofNat (charged.toNat - L charged.toNat + g.toNat) ≤ charged := by
+  apply UInt256.ofNat_le_of_le_toNat
+  have hL := L_le_self charged.toNat
+  omega
+
+lemma AccountAddress.ofUInt256_ofNat (a : AccountAddress) :
+    AccountAddress.ofUInt256 (UInt256.ofNat ↑a) = a := by
+  apply Fin.ext
+  unfold AccountAddress.ofUInt256 UInt256.ofNat
+  simp [Id.run]
+  have ha256 : a.val < UInt256.size := Nat.lt_trans a.isLt (by decide)
+  simp [Nat.mod_eq_of_lt ha256, Nat.mod_eq_of_lt a.isLt]
+
+lemma precompile_ECREC_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_ECREC σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_ECREC
+  by_cases hgas : g.toNat < 3000
+  · simp [hgas, UInt256.zero_le]
+  · simp [hgas, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+
+lemma precompile_SHA256_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_SHA256 σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_SHA256
+  by_cases hgas : g.toNat < 60 + 12 * ((I.calldata.size + 31) / 32)
+  · simp [hgas, UInt256.zero_le]
+  · cases ffi.SHA256 I.calldata <;>
+      simp [hgas, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+
+lemma precompile_RIP160_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_RIP160 σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_RIP160
+  by_cases hgas : g.toNat < 600 + 120 * ((I.calldata.size + 31) / 32)
+  · simp [hgas, UInt256.zero_le]
+  · cases RIP160 I.calldata <;>
+      simp [hgas, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+
+lemma precompile_ID_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_ID σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_ID
+  by_cases hgas : g.toNat < 15 + 3 * ((I.calldata.size + 31) / 32)
+  · simp [hgas, UInt256.zero_le]
+  · simp [hgas, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+
+lemma precompile_EXPMOD_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_EXPMOD σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_EXPMOD
+  by_cases hgas : g.toNat < Ξ_EXPMOD_gasRequired I
+  · simp [hgas, UInt256.zero_le]
+  · simp [hgas, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+
+lemma precompile_BN_ADD_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_BN_ADD σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_BN_ADD
+  by_cases hgas : g.toNat < 150
+  · simp [hgas, UInt256.zero_le]
+  · cases hres : BN_ADD (I.calldata.readBytes 0 32) (I.calldata.readBytes 32 32)
+      (I.calldata.readBytes 64 32) (I.calldata.readBytes 96 32) with
+    | ok o =>
+      simp [hgas, hres, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+    | error e =>
+      simpa [hgas, hres] using UInt256.zero_le g
+
+lemma precompile_BN_MUL_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_BN_MUL σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_BN_MUL
+  by_cases hgas : g.toNat < 6000
+  · simp [hgas, UInt256.zero_le]
+  · cases hres : BN_MUL (I.calldata.readBytes 0 32) (I.calldata.readBytes 32 32)
+      (I.calldata.readBytes 64 32) with
+    | ok o =>
+      simp [hgas, hres, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+    | error e =>
+      simpa [hgas, hres] using UInt256.zero_le g
+
+lemma precompile_SNARKV_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_SNARKV σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_SNARKV
+  by_cases hgas : g.toNat < 34000 * (I.calldata.size / 192) + 45000
+  · simp [hgas, UInt256.zero_le]
+  · cases hres : SNARKV I.calldata with
+    | ok o =>
+      simp [hgas, hres, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+    | error e =>
+      simpa [hgas, hres] using UInt256.zero_le g
+
+lemma precompile_BLAKE2_F_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_BLAKE2_F σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_BLAKE2_F
+  by_cases hgas : g.toNat < fromByteArrayBigEndian (I.calldata.extract 0 4)
+  · simpa [hgas] using UInt256.zero_le g
+  · cases hres : ffi.BLAKE2 I.calldata with
+    | ok o =>
+      simp [hgas, hres, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+    | error e =>
+      simpa [hgas, hres] using UInt256.zero_le g
+
+lemma precompile_PointEval_gas_le (σ : AccountMap .EVM) (g : UInt256) (A : Substate)
+    (I : ExecutionEnv .EVM) : (Ξ_PointEval σ g A I).2.2.1 ≤ g := by
+  unfold Ξ_PointEval
+  by_cases hgas : g.toNat < 50000
+  · simp [hgas, UInt256.zero_le]
+  · cases hres : PointEval I.calldata with
+    | ok o =>
+      simp [hgas, hres, UInt256.sub_ofNat_le (Nat.le_of_not_gt hgas)]
+    | error e =>
+      simpa [hgas, hres] using UInt256.zero_le g
+
+lemma call_termination_of_Ccall_le {gas recipient t value : UInt256} {evmState : State}
+    (h :
+      Ccall (AccountAddress.ofUInt256 t) (AccountAddress.ofUInt256 recipient) value gas
+          evmState.toSharedState.1.accountMap evmState.toMachineState evmState.toSharedState.1.substate ≤
+        evmState.gasAvailable.toNat) :
+    call_termination gas recipient t value evmState := by
+  unfold call_termination
+  apply UInt256.ofNat_lt_of_lt_toNat
+  simpa using Nat.lt_of_lt_of_le
+    (Ccallgas_lt_Ccall (AccountAddress.ofUInt256 t) (AccountAddress.ofUInt256 recipient)
+      value gas evmState.toSharedState.1.accountMap evmState.toMachineState evmState.toSharedState.1.substate)
+    h
+
+lemma create_step_termination_of_C_le {gasCost : Nat} {evmState : State}
+    (hpos : 0 < gasCost) (hle : gasCost ≤ evmState.gasAvailable.toNat) :
+    UInt256.ofNat (L (evmState.gasAvailable - UInt256.ofNat gasCost).toNat) <
+      evmState.gasAvailable := by
+  apply UInt256.ofNat_lt_of_lt_toNat
+  rw [UInt256.toNat_sub_ofNat_of_le hle]
+  exact L_lt_of_pos hpos hle
+
+lemma C'_CREATE_pos (evmState : State) :
+    0 < C' evmState Operation.CREATE := by
+  simp [C', GasConstants.Gcreate]
+
+lemma C'_CREATE2_pos (evmState : State) :
+    0 < C' evmState Operation.CREATE2 := by
+  simp [C', GasConstants.Gcreate]
+
+lemma generic_step_gas_lt_of_charged {gasCost : Nat} {instr : Operation .EVM}
+    {arg : Option (UInt256 × Nat)} {evmState evmState' : State}
+    (hop : instr ∉ ([Operation.CREATE, Operation.CREATE2, Operation.CALL, Operation.CALLCODE,
+      Operation.DELEGATECALL, Operation.STATICCALL] : List (Operation .EVM)))
+    (hpos : 0 < gasCost) (hle : gasCost ≤ evmState.gasAvailable.toNat)
+    (h :
+      (EvmYul.step (τ := OperationType.EVM) instr arg)
+          ({ evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost } : State) =
+        .ok evmState') :
+    evmState'.gasAvailable < evmState.gasAvailable := by
+  have hpreserve := EvmYul.evm_step_preserves_gas_of_not_call_create hop h
+  rw [hpreserve]
+  exact UInt256.sub_ofNat_lt_of_pos_le hpos hle
+
+def generic_step_result_of_charged (gasCost : Nat) (instr : Operation .EVM)
+    (arg : Option (UInt256 × Nat)) (evmState : State)
+    (hop : instr ∉ ([Operation.CREATE, Operation.CREATE2, Operation.CALL, Operation.CALLCODE,
+      Operation.DELEGATECALL, Operation.STATICCALL] : List (Operation .EVM))) :
+    Except EVM.ExecutionException (StepResult gasCost evmState) :=
+  match h :
+      (EvmYul.step (τ := OperationType.EVM) instr arg)
+        ({ evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost } : State) with
+  | .error e => .error e
+  | .ok evmState' =>
+      .ok
+        { state := evmState'
+          gas_le := by
+            intro hle
+            by_cases hpos : 0 < gasCost
+            · have hlt := generic_step_gas_lt_of_charged hop hpos hle h
+              unfold LT.lt UInt256.instLT at hlt
+              unfold LE.le UInt256.instLE
+              exact Nat.le_of_lt hlt
+            · have hzero : gasCost = 0 := Nat.eq_zero_of_not_pos hpos
+              subst gasCost
+              have hpreserve := EvmYul.evm_step_preserves_gas_of_not_call_create hop h
+              rw [hpreserve]
+              change evmState.gasAvailable - UInt256.ofNat 0 ≤ evmState.gasAvailable
+              exact UInt256.sub_ofNat_le (Nat.zero_le _)
+          gas_lt := by
+            intro hpos hle
+            exact generic_step_gas_lt_of_charged hop hpos hle h
+        }
+
+def generic_step_result_of_charged_from_exec (gasCost : Nat) (instr : Operation .EVM)
+    (arg : Option (UInt256 × Nat)) (evmStateBase evmStateExec : State)
+    (hop : instr ∉ ([Operation.CREATE, Operation.CREATE2, Operation.CALL, Operation.CALLCODE,
+      Operation.DELEGATECALL, Operation.STATICCALL] : List (Operation .EVM))) :
+    Except EVM.ExecutionException (StepResult gasCost evmStateBase) :=
+  match h :
+      (EvmYul.step (τ := OperationType.EVM) instr arg)
+        ({ evmStateExec with
+            gasAvailable := evmStateBase.gasAvailable - UInt256.ofNat gasCost
+        } : State) with
+  | .error e => .error e
+  | .ok evmState' =>
+      .ok
+        { state := evmState'
+          gas_le := by
+            intro hle
+            by_cases hpos : 0 < gasCost
+            · have hpreserve := EvmYul.evm_step_preserves_gas_of_not_call_create hop h
+              rw [hpreserve]
+              exact UInt256.sub_ofNat_le hle
+            · have hzero : gasCost = 0 := Nat.eq_zero_of_not_pos hpos
+              subst gasCost
+              have hpreserve := EvmYul.evm_step_preserves_gas_of_not_call_create hop h
+              rw [hpreserve]
+              change evmStateBase.gasAvailable - UInt256.ofNat 0 ≤ evmStateBase.gasAvailable
+              exact UInt256.sub_ofNat_le (Nat.zero_le _)
+          gas_lt := by
+            intro hpos hle
+            have hpreserve := EvmYul.evm_step_preserves_gas_of_not_call_create hop h
+            rw [hpreserve]
+            exact UInt256.sub_ofNat_lt_of_pos_le hpos hle
+        }
+
+def X_W (w : Operation .EVM) (s : Stack UInt256) : Bool :=
+  w ∈ [.CREATE, .CREATE2, .SSTORE, .SELFDESTRUCT, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4, .TSTORE] ∨
+  (w = .CALL ∧ s[2]? ≠ some ⟨0⟩)
+
+def X_belongs (o : Option UInt256) (l : Array UInt256) : Bool :=
+  match o with
+    | none => false
+    | some n => l.contains n
+
+def X_notIn (o : Option UInt256) (l : Array UInt256) : Bool := not (X_belongs o l)
+
+def X_Z (validJumps : Array UInt256) (w : Operation .EVM) (evmState : State) :
+    Except EVM.ExecutionException (State × ℕ) :=
+  if δ w = none then
+    .error .InvalidInstruction
+  else if evmState.stack.length < (δ w).getD 0 then
+    .error .StackUnderflow
+  else
+    let cost₁ := memoryExpansionCost evmState w
+    if evmState.gasAvailable.toNat < cost₁ then
+      .error .OutOfGass
+    else
+      let gasAvailable := evmState.gasAvailable - .ofNat cost₁
+      let evmState := { evmState with gasAvailable := gasAvailable}
+      let cost₂ := C' evmState w
+      if evmState.gasAvailable.toNat < cost₂ then
+        .error .OutOfGass
+      else
+        let invalidJump := X_notIn evmState.stack[0]? validJumps
+        if w = .JUMP ∧ invalidJump then
+          .error .BadJumpDestination
+        else if w = .JUMPI ∧ (evmState.stack[1]? ≠ some ⟨0⟩) ∧ invalidJump then
+          .error .BadJumpDestination
+        else if w = .RETURNDATACOPY ∧ (evmState.stack.getD 1 ⟨0⟩).toNat + (evmState.stack.getD 2 ⟨0⟩).toNat > evmState.returnData.size then
+          .error .InvalidMemoryAccess
+        else if evmState.stack.length - (δ w).getD 0 + (α w).getD 0 > 1024 then
+          .error .StackOverflow
+        else if (¬ evmState.executionEnv.perm) ∧ X_W w evmState.stack then
+          .error .StaticModeViolation
+        else if (w = .SSTORE) ∧ evmState.gasAvailable.toNat ≤ GasConstants.Gcallstipend then
+          .error .OutOfGass
+        else if w.isCreate ∧ evmState.stack.getD 2 ⟨0⟩ > ⟨49152⟩ then
+          .error .OutOfGass
+        else
+          .ok (evmState, cost₂)
+
+theorem X_Z_step_termination {validJumps : Array UInt256} {w : Operation .EVM}
+    {evmState evmState' : State} {cost : ℕ}
+    (h : X_Z validJumps w evmState = .ok (evmState', cost)) :
+    step_termination cost w evmState' := by
+  unfold X_Z at h
+  by_cases hδ : δ w = none
+  · simp [hδ] at h
+  simp [hδ] at h
+  by_cases hstack : evmState.stack.length < (δ w).getD 0
+  · simp [hstack] at h
+  simp [hstack] at h
+  by_cases hcost₁ : evmState.gasAvailable.toNat < memoryExpansionCost evmState w
+  · simp [hcost₁] at h
+  simp [hcost₁] at h
+  set evmState₁ : State := ({ evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w) } : State) with hev₁
+  by_cases hcost₂ : (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat < C' evmState₁ w
+  · simp [hcost₂] at h
+  simp [hcost₂] at h
+  by_cases hjump : w = Operation.JUMP ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjump] at h
+  simp [hjump] at h
+  by_cases hjumpi : w = Operation.JUMPI ∧ evmState.stack[1]? ≠ some { val := 0 } ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjumpi] at h
+  simp [hjumpi] at h
+  by_cases hreturndata :
+      w = Operation.RETURNDATACOPY ∧
+        evmState.returnData.size <
+          (evmState.stack[1]?.getD (⟨0⟩ : UInt256)).toNat + (evmState.stack[2]?.getD (⟨0⟩ : UInt256)).toNat
+  · simp [hreturndata.1, hreturndata.2] at h
+  simp [hreturndata] at h
+  by_cases hoverflow : 1024 < List.length evmState.stack - (δ w).getD 0 + (α w).getD 0
+  · simp [hoverflow] at h
+  simp [hoverflow] at h
+  by_cases hstatic : evmState.executionEnv.perm = false ∧ X_W w evmState.stack = true
+  · simp [hstatic] at h
+  simp [hstatic] at h
+  by_cases hsstore :
+      w = Operation.SSTORE ∧
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat ≤
+          GasConstants.Gcallstipend
+  · have hsstoreCost :
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.SSTORE)).toNat ≤
+          GasConstants.Gcallstipend := by
+        simpa [hsstore.1] using hsstore.2
+    simp [hsstore.1, hsstoreCost] at h
+  simp [hsstore] at h
+  by_cases hcreate : w.isCreate = true ∧ { val := 49152 } < evmState.stack[2]?.getD { val := 0 }
+  · simp [hcreate] at h
+  simp [hcreate] at h
+  rcases h with ⟨hstate, hcost⟩
+  subst evmState'
+  subst cost
+  subst evmState₁
+  cases w <;> rename_i a <;> cases a <;> simp [step_termination] at *
+  case neg.System.CREATE =>
+    exact create_step_termination_of_C_le
+      (gasCost := C' ({ evmState with gasAvailable :=
+        (evmState.gasAvailable - UInt256.ofNat
+          (memoryExpansionCost evmState Operation.CREATE)) } : State) Operation.CREATE)
+      (evmState := { evmState with gasAvailable :=
+        (evmState.gasAvailable - UInt256.ofNat
+          (memoryExpansionCost evmState Operation.CREATE)) })
+      (C'_CREATE_pos _)
+      (by simpa using hcost₂)
+  case neg.System.CREATE2 =>
+    exact create_step_termination_of_C_le
+      (gasCost := C' ({ evmState with gasAvailable :=
+        (evmState.gasAvailable - UInt256.ofNat
+          (memoryExpansionCost evmState Operation.CREATE2)) } : State) Operation.CREATE2)
+      (evmState := { evmState with gasAvailable :=
+        (evmState.gasAvailable - UInt256.ofNat
+          (memoryExpansionCost evmState Operation.CREATE2)) })
+      (C'_CREATE2_pos _)
+      (by simpa using hcost₂)
+  case neg.System.CALL =>
+    cases hstk : evmState.stack with
+    | nil => simp
+    | cons μ₀ stack =>
+      cases stack with
+      | nil => simp
+      | cons μ₁ stack =>
+        cases stack with
+        | nil => simp
+        | cons μ₂ stack =>
+          constructor
+          · apply call_termination_of_Ccall_le
+            simpa [C', hstk] using hcost₂
+          · simpa [C', hstk] using
+              Ccallgas_lt_Ccall (AccountAddress.ofUInt256 μ₁) (AccountAddress.ofUInt256 μ₁)
+                μ₂ μ₀ evmState.toSharedState.1.accountMap
+                { gasAvailable :=
+                    evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.CALL)
+                  activeWords := evmState.activeWords
+                  memory := evmState.memory
+                  returnData := evmState.returnData
+                  H_return := evmState.H_return }
+                evmState.toSharedState.1.substate
+  case neg.System.CALLCODE =>
+    cases hstk : evmState.stack with
+    | nil => simp
+    | cons μ₀ stack =>
+      cases stack with
+      | nil => simp
+      | cons μ₁ stack =>
+        cases stack with
+        | nil => simp
+        | cons μ₂ stack =>
+          constructor
+          · apply call_termination_of_Ccall_le
+            simpa [C', hstk, AccountAddress.ofUInt256_ofNat] using hcost₂
+          · simpa [C', hstk, AccountAddress.ofUInt256_ofNat] using
+              Ccallgas_lt_Ccall (AccountAddress.ofUInt256 μ₁) evmState.executionEnv.codeOwner
+                μ₂ μ₀ evmState.toSharedState.1.accountMap
+                { gasAvailable :=
+                    evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.CALLCODE)
+                  activeWords := evmState.activeWords
+                  memory := evmState.memory
+                  returnData := evmState.returnData
+                  H_return := evmState.H_return }
+                evmState.toSharedState.1.substate
+  case neg.System.DELEGATECALL =>
+    cases hstk : evmState.stack with
+    | nil => simp
+    | cons μ₀ stack =>
+      cases stack with
+      | nil => simp
+      | cons μ₁ stack =>
+        constructor
+        · apply call_termination_of_Ccall_le
+          simpa [C', hstk, AccountAddress.ofUInt256_ofNat] using hcost₂
+        · simpa [C', hstk, AccountAddress.ofUInt256_ofNat] using
+            Ccallgas_lt_Ccall (AccountAddress.ofUInt256 μ₁) evmState.executionEnv.codeOwner
+              ({ val := 0 } : UInt256) μ₀ evmState.toSharedState.1.accountMap
+              { gasAvailable :=
+                  evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.DELEGATECALL)
+                activeWords := evmState.activeWords
+                memory := evmState.memory
+                returnData := evmState.returnData
+                H_return := evmState.H_return }
+              evmState.toSharedState.1.substate
+  case neg.System.STATICCALL =>
+    cases hstk : evmState.stack with
+    | nil => simp
+    | cons μ₀ stack =>
+      cases stack with
+      | nil => simp
+      | cons μ₁ stack =>
+        constructor
+        · apply call_termination_of_Ccall_le
+          simpa [C', hstk] using hcost₂
+        · simpa [C', hstk] using
+            Ccallgas_lt_Ccall (AccountAddress.ofUInt256 μ₁) (AccountAddress.ofUInt256 μ₁)
+              ({ val := 0 } : UInt256) μ₀ evmState.toSharedState.1.accountMap
+              { gasAvailable :=
+                  evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.STATICCALL)
+                activeWords := evmState.activeWords
+                memory := evmState.memory
+                returnData := evmState.returnData
+                H_return := evmState.H_return }
+              evmState.toSharedState.1.substate
+
+theorem X_Z_cost_le {validJumps : Array UInt256} {w : Operation .EVM}
+    {evmState evmState' : State} {cost : ℕ}
+    (h : X_Z validJumps w evmState = .ok (evmState', cost)) :
+    cost ≤ evmState'.gasAvailable.toNat := by
+  unfold X_Z at h
+  by_cases hδ : δ w = none
+  · simp [hδ] at h
+  simp [hδ] at h
+  by_cases hstack : evmState.stack.length < (δ w).getD 0
+  · simp [hstack] at h
+  simp [hstack] at h
+  by_cases hcost₁ : evmState.gasAvailable.toNat < memoryExpansionCost evmState w
+  · simp [hcost₁] at h
+  simp [hcost₁] at h
+  set evmState₁ : State := ({ evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w) } : State) with hev₁
+  by_cases hcost₂ : (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat < C' evmState₁ w
+  · simp [hcost₂] at h
+  simp [hcost₂] at h
+  by_cases hjump : w = Operation.JUMP ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjump] at h
+  simp [hjump] at h
+  by_cases hjumpi : w = Operation.JUMPI ∧ evmState.stack[1]? ≠ some { val := 0 } ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjumpi] at h
+  simp [hjumpi] at h
+  by_cases hreturndata :
+      w = Operation.RETURNDATACOPY ∧
+        evmState.returnData.size <
+          (evmState.stack[1]?.getD (⟨0⟩ : UInt256)).toNat + (evmState.stack[2]?.getD (⟨0⟩ : UInt256)).toNat
+  · simp [hreturndata.1, hreturndata.2] at h
+  simp [hreturndata] at h
+  by_cases hoverflow : 1024 < List.length evmState.stack - (δ w).getD 0 + (α w).getD 0
+  · simp [hoverflow] at h
+  simp [hoverflow] at h
+  by_cases hstatic : evmState.executionEnv.perm = false ∧ X_W w evmState.stack = true
+  · simp [hstatic] at h
+  simp [hstatic] at h
+  by_cases hsstore :
+      w = Operation.SSTORE ∧
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat ≤
+          GasConstants.Gcallstipend
+  · have hsstoreCost :
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.SSTORE)).toNat ≤
+          GasConstants.Gcallstipend := by
+        simpa [hsstore.1] using hsstore.2
+    simp [hsstore.1, hsstoreCost] at h
+  simp [hsstore] at h
+  by_cases hcreate : w.isCreate = true ∧ { val := 49152 } < evmState.stack[2]?.getD { val := 0 }
+  · simp [hcreate] at h
+  simp [hcreate] at h
+  rcases h with ⟨hstate, hcost⟩
+  subst evmState'
+  subst cost
+  subst evmState₁
+  exact Nat.le_of_not_gt hcost₂
+
+theorem X_Z_cost_pos_of_continues {validJumps : Array UInt256} {w : Operation .EVM}
+    {evmState evmState' : State} {cost : ℕ}
+    (h : X_Z validJumps w evmState = .ok (evmState', cost))
+    (hcont : ContinuesAfterXStep w) :
+    0 < cost := by
+  unfold X_Z at h
+  by_cases hδ : δ w = none
+  · simp [hδ] at h
+  simp [hδ] at h
+  by_cases hstack : evmState.stack.length < (δ w).getD 0
+  · simp [hstack] at h
+  simp [hstack] at h
+  by_cases hcost₁ : evmState.gasAvailable.toNat < memoryExpansionCost evmState w
+  · simp [hcost₁] at h
+  simp [hcost₁] at h
+  set evmState₁ : State := ({ evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w) } : State) with hev₁
+  by_cases hcost₂ : (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat < C' evmState₁ w
+  · simp [hcost₂] at h
+  simp [hcost₂] at h
+  by_cases hjump : w = Operation.JUMP ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjump] at h
+  simp [hjump] at h
+  by_cases hjumpi : w = Operation.JUMPI ∧ evmState.stack[1]? ≠ some { val := 0 } ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjumpi] at h
+  simp [hjumpi] at h
+  by_cases hreturndata :
+      w = Operation.RETURNDATACOPY ∧
+        evmState.returnData.size <
+          (evmState.stack[1]?.getD (⟨0⟩ : UInt256)).toNat + (evmState.stack[2]?.getD (⟨0⟩ : UInt256)).toNat
+  · simp [hreturndata.1, hreturndata.2] at h
+  simp [hreturndata] at h
+  by_cases hoverflow : 1024 < List.length evmState.stack - (δ w).getD 0 + (α w).getD 0
+  · simp [hoverflow] at h
+  simp [hoverflow] at h
+  by_cases hstatic : evmState.executionEnv.perm = false ∧ X_W w evmState.stack = true
+  · simp [hstatic] at h
+  simp [hstatic] at h
+  by_cases hsstore :
+      w = Operation.SSTORE ∧
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat ≤
+          GasConstants.Gcallstipend
+  · have hsstoreCost :
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.SSTORE)).toNat ≤
+          GasConstants.Gcallstipend := by
+        simpa [hsstore.1] using hsstore.2
+    simp [hsstore.1, hsstoreCost] at h
+  simp [hsstore] at h
+  by_cases hcreate : w.isCreate = true ∧ { val := 49152 } < evmState.stack[2]?.getD { val := 0 }
+  · simp [hcreate] at h
+  simp [hcreate] at h
+  rcases h with ⟨hstate, hcost⟩
+  subst evmState'
+  subst cost
+  subst evmState₁
+  exact C'_pos_of_continuesAfterXStep _ hcont
+
+theorem X_Z_state_gas_le {validJumps : Array UInt256} {w : Operation .EVM}
+    {evmState evmState' : State} {cost : ℕ}
+    (h : X_Z validJumps w evmState = .ok (evmState', cost)) :
+    evmState'.gasAvailable ≤ evmState.gasAvailable := by
+  unfold X_Z at h
+  by_cases hδ : δ w = none
+  · simp [hδ] at h
+  simp [hδ] at h
+  by_cases hstack : evmState.stack.length < (δ w).getD 0
+  · simp [hstack] at h
+  simp [hstack] at h
+  by_cases hcost₁ : evmState.gasAvailable.toNat < memoryExpansionCost evmState w
+  · simp [hcost₁] at h
+  simp [hcost₁] at h
+  set evmState₁ : State := ({ evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w) } : State) with hev₁
+  by_cases hcost₂ : (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat < C' evmState₁ w
+  · simp [hcost₂] at h
+  simp [hcost₂] at h
+  by_cases hjump : w = Operation.JUMP ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjump] at h
+  simp [hjump] at h
+  by_cases hjumpi : w = Operation.JUMPI ∧ evmState.stack[1]? ≠ some { val := 0 } ∧ X_notIn evmState.stack[0]? validJumps = true
+  · simp [hjumpi] at h
+  simp [hjumpi] at h
+  by_cases hreturndata :
+      w = Operation.RETURNDATACOPY ∧
+        evmState.returnData.size <
+          (evmState.stack[1]?.getD (⟨0⟩ : UInt256)).toNat + (evmState.stack[2]?.getD (⟨0⟩ : UInt256)).toNat
+  · simp [hreturndata.1, hreturndata.2] at h
+  simp [hreturndata] at h
+  by_cases hoverflow : 1024 < List.length evmState.stack - (δ w).getD 0 + (α w).getD 0
+  · simp [hoverflow] at h
+  simp [hoverflow] at h
+  by_cases hstatic : evmState.executionEnv.perm = false ∧ X_W w evmState.stack = true
+  · simp [hstatic] at h
+  simp [hstatic] at h
+  by_cases hsstore :
+      w = Operation.SSTORE ∧
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState w)).toNat ≤
+          GasConstants.Gcallstipend
+  · have hsstoreCost :
+        (evmState.gasAvailable - UInt256.ofNat (memoryExpansionCost evmState Operation.SSTORE)).toNat ≤
+          GasConstants.Gcallstipend := by
+        simpa [hsstore.1] using hsstore.2
+    simp [hsstore.1, hsstoreCost] at h
+  simp [hsstore] at h
+  by_cases hcreate : w.isCreate = true ∧ { val := 49152 } < evmState.stack[2]?.getD { val := 0 }
+  · simp [hcreate] at h
+  simp [hcreate] at h
+  rcases h with ⟨hstate, hcost⟩
+  subst evmState'
+  subst cost
+  subst evmState₁
+  exact UInt256.sub_ofNat_le (Nat.le_of_not_gt hcost₁)
+
 mutual
 
-def call (fuel : Nat)
+def call
   (gasCost : Nat)
   (blobVersionedHashes : List ByteArray)
   (gas source recipient t value value' inOffset inSize outOffset outSize : UInt256)
   (permission : Bool)
   (evmState : State)
+  (hterm : call_termination gas recipient t value evmState)
+  (hcallgas_lt :
+    Ccallgas (AccountAddress.ofUInt256 t) (AccountAddress.ofUInt256 recipient) value gas
+      evmState.accountMap evmState.toMachineState evmState.substate < gasCost)
     :
-  Except EVM.ExecutionException (UInt256 × State)
+  Except EVM.ExecutionException (CallResult gasCost evmState)
 := do
-  match fuel with
-    | 0 => .error .OutOfFuel
-    | .succ f =>
+      let _htermUsed := hterm
       let t : AccountAddress := AccountAddress.ofUInt256 t
       let recipient : AccountAddress := AccountAddress.ofUInt256 recipient
       let source : AccountAddress := AccountAddress.ofUInt256 source
@@ -161,10 +1028,10 @@ def call (fuel : Nat)
       -- m[μs[3] . . . (μs[3] + μs[4] − 1)]
       let i := evmState.memory.readWithPadding inOffset.toNat inSize.toNat
       let A' := evmState.addAccessedAccount t |>.substate
-      let (cA, σ', g', A', z, o) ← do
+      let callSubResult : CallSubResult callgas ← do
         if value ≤ (σ.find? Iₐ |>.option ⟨0⟩ (·.balance)) ∧ Iₑ < 1024 then
           let resultOfΘ ←
-            Θ (fuel := f)
+            ΘWithGas
               blobVersionedHashes
               (createdAccounts := evmState.createdAccounts)
               (genesisBlockHeader := evmState.genesisBlockHeader)
@@ -184,11 +1051,35 @@ def call (fuel : Nat)
               (e  := Iₑ + 1)
               (H := evmState.executionEnv.header)
               (w  := permission)                            -- I_w in Θ(.., I_W)
-          pure resultOfΘ
+          pure
+            { createdAccounts := resultOfΘ.createdAccounts
+              accountMap := resultOfΘ.accountMap
+              gas := resultOfΘ.gas
+              substate := resultOfΘ.substate
+              success := resultOfΘ.success
+              output := resultOfΘ.output
+              gas_le := resultOfΘ.gas_le
+            : CallSubResult callgas }
         else
           -- otherwise (σ, CCALLGAS(σ, μ, A), A, 0, ())
           .ok
-            (evmState.createdAccounts, evmState.toState.accountMap, .ofNat callgas, A', false, .empty)
+            { createdAccounts := evmState.createdAccounts
+              accountMap := evmState.toState.accountMap
+              gas := .ofNat callgas
+              substate := A'
+              success := false
+              output := .empty
+              gas_le := le_rfl
+            : CallSubResult callgas }
+      let cA := callSubResult.createdAccounts
+      let σ' := callSubResult.accountMap
+      let g' := callSubResult.gas
+      let A' := callSubResult.substate
+      let z := callSubResult.success
+      let o := callSubResult.output
+      have hg'_le_ofNat : g' ≤ UInt256.ofNat callgas := callSubResult.gas_le
+      have hcallgas_lt_local : callgas < gasCost := by
+        simpa [callgas, σ] using hcallgas_lt
       -- n ≡ min({μs[6], ‖o‖})
       let n : UInt256 := min outSize (.ofNat o.size)
 
@@ -216,22 +1107,44 @@ def call (fuel : Nat)
       let result := {
         result with toMachineState := μ'incomplete
       }
-      .ok (x, result)
-termination_by fuel
+      .ok
+        { x := x
+          state := result
+          gas_le := by
+            intro hle
+            have hg'_toNat_le : g'.toNat ≤ callgas :=
+              Nat.le_trans (UInt256.toNat_le_of_le hg'_le_ofNat) (UInt256.toNat_ofNat_le callgas)
+            simpa [writeBytes] using
+              UInt256.add_le_of_toNat_add_le (a := evmState.gasAvailable) (b := g') (by
+                rw [UInt256.toNat_sub_ofNat_of_le hle]
+                omega)
+          gas_lt := by
+            intro hpos hle
+            have hg'_toNat_le : g'.toNat ≤ callgas :=
+              Nat.le_trans (UInt256.toNat_le_of_le hg'_le_ofNat) (UInt256.toNat_ofNat_le callgas)
+            simpa [writeBytes] using
+              UInt256.add_lt_of_toNat_add_lt (a := evmState.gasAvailable) (b := g') (by
+                rw [UInt256.toNat_sub_ofNat_of_le hle]
+                omega)
+        }
+      termination_by (evmState.gasAvailable, 0)
+      decreasing_by 
+        apply Prod.Lex.left 
+        simp [call_termination] at hterm
+        apply sizeOf_UInt256_le
+        assumption
 
-def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option (UInt256 × Nat)) := .none)
-  : EVM.Transformer
+def step (gasCost : ℕ) (instr : Operation .EVM) (arg : Option (UInt256 × Nat) := .none) (evmState : State)
+  (hterm : step_termination gasCost instr evmState)
+  : Except EVM.ExecutionException (StepResult gasCost evmState)
 :=
-  match fuel with
-    | 0 => λ _ ↦ .error .OutOfFuel
-    | .succ f =>
-    λ (evmState : EVM.State) ↦ do
     -- This will normally be called from `Ξ` (or `X`) with `fetchInstr` already having been called.
     -- That said, we sometimes want a `step : EVM.Transformer` and as such, we can decode on demand.
-    let (instr, arg) ←
-      match instr with
-        | .none => fetchInstr evmState.toState.executionEnv evmState.pc
-        | .some (instr, arg) => pure (instr, arg)
+    -- let (instr, arg) ←
+    --   match instr with
+    --     | .none => fetchInstr evmState.toState.executionEnv evmState.pc
+    --     | .some (instr, arg) => pure (instr, arg)
+    let evmStateBase := evmState
     let evmState := { evmState with execLength := evmState.execLength + 1 }
     match instr with
       | .CREATE =>
@@ -248,13 +1161,20 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
             let σ_Iₐ : Account .EVM := σ.find? Iₐ |>.getD default
             let σStar := σ.insert Iₐ {σ_Iₐ with nonce := σ_Iₐ.nonce + ⟨1⟩}
 
-            let (a, evmState', g', z, o)
-                  : (AccountAddress × EVM.State × UInt256 × Bool × ByteArray)
+            let createResult : CreateSubResult (L evmState.gasAvailable.toNat)
               :=
-              if σ_Iₐ.nonce.toNat ≥ 2^64-1 then (default, evmState, .ofNat (L evmState.gasAvailable.toNat), False, .empty) else
+              if σ_Iₐ.nonce.toNat ≥ 2^64-1 then
+                { address := default
+                  state := evmState
+                  gas := .ofNat (L evmState.gasAvailable.toNat)
+                  success := False
+                  output := .empty
+                  gas_toNat_le := by
+                    exact UInt256.toNat_ofNat_le _ }
+              else
               if μ₀ ≤ (σ.find? Iₐ |>.option ⟨0⟩ (·.balance)) ∧ Iₑ < 1024 ∧ i.size ≤ 49152 then
                 let Λ :=
-                  Lambda f
+                  LambdaWithGas
                     evmState.executionEnv.blobVersionedHashes
                     evmState.createdAccounts
                     evmState.genesisBlockHeader
@@ -273,20 +1193,42 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
                     I.header
                     I.perm
                 match Λ with
-                  | .ok (a, cA, σ', g', A', z, o) =>
-                    ( a
-                    , { evmState with
-                          accountMap := σ'
-                          substate := A'
-                          createdAccounts := cA
+                  | .ok Λ =>
+                    { address := Λ.address
+                      state := { evmState with
+                        accountMap := Λ.accountMap
+                        substate := Λ.substate
+                        createdAccounts := Λ.createdAccounts
                       }
-                    , g'
-                    , z
-                    , o
-                    )
-                  | _ => (0, {evmState with accountMap := ∅}, ⟨0⟩, False, .empty)
+                      gas := Λ.gas
+                      success := Λ.success
+                      output := Λ.output
+                      gas_toNat_le := by
+                        have hLlt : L evmState.gasAvailable.toNat < UInt256.size :=
+                          Nat.lt_of_le_of_lt (L_le_self _) evmState.gasAvailable.val.isLt
+                        exact UInt256.toNat_le_of_le_ofNat Λ.gas_le hLlt
+                    }
+                  | _ =>
+                    { address := 0
+                      state := {evmState with accountMap := ∅}
+                      gas := ⟨0⟩
+                      success := False
+                      output := .empty
+                      gas_toNat_le := Nat.zero_le _ }
               else
-                (0, evmState, .ofNat (L evmState.gasAvailable.toNat), False, .empty)
+                { address := 0
+                  state := evmState
+                  gas := .ofNat (L evmState.gasAvailable.toNat)
+                  success := False
+                  output := .empty
+                  gas_toNat_le := by
+                    exact UInt256.toNat_ofNat_le _ }
+            let a := createResult.address
+            let evmState' := createResult.state
+            let g' := createResult.gas
+            let z := createResult.success
+            let o := createResult.output
+            have hg'_le : g'.toNat ≤ L evmState.gasAvailable.toNat := createResult.gas_toNat_le
             let x : UInt256 :=
               let balance := σ.find? Iₐ |>.option ⟨0⟩ (·.balance)
                 if z = false ∨ Iₑ = 1024 ∨ μ₀ > balance ∨ i.size > 49152 then ⟨0⟩ else .ofNat a
@@ -300,7 +1242,31 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
                   gasAvailable :=
                     .ofNat <| evmState.gasAvailable.toNat - L (evmState.gasAvailable.toNat) + g'.toNat
               }
-            .ok <| evmState'.replaceStackAndIncrPC (stack.push x)
+            .ok
+              { state := evmState'.replaceStackAndIncrPC (stack.push x)
+                gas_le := by
+                  intro hle
+                  have hfinal_le_charged :
+                      UInt256.ofNat (evmState.gasAvailable.toNat - L evmState.gasAvailable.toNat + g'.toNat) ≤
+                        evmState.gasAvailable :=
+                    create_refund_gas_le_charged hg'_le
+                  have hcharged_le := UInt256.sub_ofNat_le hle
+                  exact
+                    (by
+                      simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                        UInt256.le_trans' hfinal_le_charged hcharged_le)
+                gas_lt := by
+                  intro hpos hle
+                  have hfinal_le_charged :
+                      UInt256.ofNat (evmState.gasAvailable.toNat - L evmState.gasAvailable.toNat + g'.toNat) ≤
+                        evmState.gasAvailable :=
+                    create_refund_gas_le_charged hg'_le
+                  have hcharged_lt := UInt256.sub_ofNat_lt_of_pos_le hpos hle
+                  exact
+                    (by
+                      simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                        UInt256.le_lt_trans' hfinal_le_charged hcharged_lt)
+              }
           | _ =>
           .error .StackUnderflow
       | .CREATE2 =>
@@ -317,11 +1283,19 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
             let σ := evmState.accountMap
             let σ_Iₐ : Account .EVM := σ.find? Iₐ |>.getD default
             let σStar := σ.insert Iₐ {σ_Iₐ with nonce := σ_Iₐ.nonce + ⟨1⟩}
-            let (a, evmState', g', z, o) : (AccountAddress × EVM.State × UInt256 × Bool × ByteArray) :=
-              if σ_Iₐ.nonce.toNat ≥ 2^64-1 then (default, evmState, .ofNat (L evmState.gasAvailable.toNat), False, .empty) else
+            let createResult : CreateSubResult (L evmState.gasAvailable.toNat) :=
+              if σ_Iₐ.nonce.toNat ≥ 2^64-1 then
+                { address := default
+                  state := evmState
+                  gas := .ofNat (L evmState.gasAvailable.toNat)
+                  success := False
+                  output := .empty
+                  gas_toNat_le := by
+                    exact UInt256.toNat_ofNat_le _ }
+              else
               if μ₀ ≤ (σ.find? Iₐ |>.option ⟨0⟩ (·.balance)) ∧ Iₑ < 1024 ∧ i.size ≤ 49152 then
                 let Λ :=
-                  Lambda f
+                  LambdaWithGas
                     evmState.executionEnv.blobVersionedHashes
                     evmState.createdAccounts
                     evmState.genesisBlockHeader
@@ -340,11 +1314,42 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
                     I.header
                     I.perm
                 match Λ with
-                  | .ok (a, cA, σ', g', A', z, o) =>
-                    (a, {evmState with accountMap := σ', substate := A', createdAccounts := cA}, g', z, o)
-                  | _ => (0, {evmState with accountMap := ∅}, ⟨0⟩, False, .empty)
+                  | .ok Λ =>
+                    { address := Λ.address
+                      state := ({ evmState with
+                        accountMap := Λ.accountMap
+                        substate := Λ.substate
+                        createdAccounts := Λ.createdAccounts
+                      } : State)
+                      gas := Λ.gas
+                      success := Λ.success
+                      output := Λ.output
+                      gas_toNat_le := by
+                        have hLlt : L evmState.gasAvailable.toNat < UInt256.size :=
+                          Nat.lt_of_le_of_lt (L_le_self _) evmState.gasAvailable.val.isLt
+                        exact UInt256.toNat_le_of_le_ofNat Λ.gas_le hLlt
+                    }
+                  | _ =>
+                    { address := 0
+                      state := {evmState with accountMap := ∅}
+                      gas := ⟨0⟩
+                      success := False
+                      output := .empty
+                      gas_toNat_le := Nat.zero_le _ }
               else
-                (0, evmState, .ofNat (L evmState.gasAvailable.toNat), False, .empty)
+                { address := 0
+                  state := evmState
+                  gas := .ofNat (L evmState.gasAvailable.toNat)
+                  success := False
+                  output := .empty
+                  gas_toNat_le := by
+                    exact UInt256.toNat_ofNat_le _ }
+            let a := createResult.address
+            let evmState' := createResult.state
+            let g' := createResult.gas
+            let z := createResult.success
+            let o := createResult.output
+            have hg'_le : g'.toNat ≤ L evmState.gasAvailable.toNat := createResult.gas_toNat_le
             let x : UInt256 :=
               let balance := σ.find? Iₐ |>.option ⟨0⟩ (·.balance)
                 if z = false ∨ Iₑ = 1024 ∨ μ₀ > balance ∨ i.size > 49152 then ⟨0⟩ else .ofNat a
@@ -357,7 +1362,31 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
                 returnData := newReturnData
                 gasAvailable := .ofNat <| evmState.gasAvailable.toNat - L (evmState.gasAvailable.toNat) + g'.toNat
               }
-            .ok <| evmState'.replaceStackAndIncrPC (stack.push x)
+            .ok
+              { state := evmState'.replaceStackAndIncrPC (stack.push x)
+                gas_le := by
+                  intro hle
+                  have hfinal_le_charged :
+                      UInt256.ofNat (evmState.gasAvailable.toNat - L evmState.gasAvailable.toNat + g'.toNat) ≤
+                        evmState.gasAvailable :=
+                    create_refund_gas_le_charged hg'_le
+                  have hcharged_le := UInt256.sub_ofNat_le hle
+                  exact
+                    (by
+                      simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                        UInt256.le_trans' hfinal_le_charged hcharged_le)
+                gas_lt := by
+                  intro hpos hle
+                  have hfinal_le_charged :
+                      UInt256.ofNat (evmState.gasAvailable.toNat - L evmState.gasAvailable.toNat + g'.toNat) ≤
+                        evmState.gasAvailable :=
+                    create_refund_gas_le_charged hg'_le
+                  have hcharged_lt := UInt256.sub_ofNat_lt_of_pos_le hpos hle
+                  exact
+                    (by
+                      simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                        UInt256.le_lt_trans' hfinal_le_charged hcharged_lt)
+              }
           | _ =>
           .error .StackUnderflow
       | .CALL => do
@@ -369,12 +1398,39 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         -- μ₄ - inSize
         -- μ₅ - outOffsize
         -- μ₆ - outSize
-        let (stack, μ₀, μ₁, μ₂, μ₃, μ₄, μ₅, μ₆) ← evmState.stack.pop7
-        let (x, state') ←
-          call f gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.codeOwner) μ₁ μ₁ μ₂ μ₂ μ₃ μ₄ μ₅ μ₆ evmState.executionEnv.perm evmState
-        let μ'ₛ := stack.push x -- μ′s[0] ≡ x
-        let evmState' := state'.replaceStackAndIncrPC μ'ₛ
-        .ok evmState'
+        -- let (stack, μ₀, μ₁, μ₂, μ₃, μ₄, μ₅, μ₆) ← evmState.stack.pop7
+        match hstack : evmState.stack with
+        | μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: (stack : Stack UInt256) =>
+          let hcallterm : call_termination μ₀ μ₁ μ₁ μ₂ evmState := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.1
+          let hcallgas_lt :
+              Ccallgas (AccountAddress.ofUInt256 μ₁) (AccountAddress.ofUInt256 μ₁) μ₂ μ₀
+                evmState.accountMap evmState.toMachineState evmState.substate < gasCost := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.2
+          let callResult ←
+            call gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.codeOwner) μ₁ μ₁ μ₂ μ₂ μ₃ μ₄ μ₅ μ₆ evmState.executionEnv.perm evmState hcallterm hcallgas_lt
+          let μ'ₛ := stack.push callResult.x -- μ′s[0] ≡ x
+          let evmState' := callResult.state.replaceStackAndIncrPC μ'ₛ
+          .ok
+            { state := evmState'
+              gas_le := by
+                intro hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_le hle
+              gas_lt := by
+                intro hpos hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_lt hpos hle
+            }
+        | _ => .error .StackUnderflow
       | .CALLCODE =>
         do
         -- Names are from the YP, these are:
@@ -385,12 +1441,40 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         -- μ₄ - inSize
         -- μ₅ - outOffsize
         -- μ₆ - outSize
-        let (stack, μ₀, μ₁, μ₂, μ₃, μ₄, μ₅, μ₆) ← evmState.stack.pop7
-        let (x, state') ←
-          call f gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.codeOwner) (.ofNat evmState.executionEnv.codeOwner) μ₁ μ₂ μ₂ μ₃ μ₄ μ₅ μ₆ evmState.executionEnv.perm evmState
-        let μ'ₛ := stack.push x -- μ′s[0] ≡ x
-        let evmState' := state'.replaceStackAndIncrPC μ'ₛ
-        .ok evmState'
+        match hstack : evmState.stack with
+        | μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: (stack : Stack UInt256) =>
+          let hcallterm : call_termination μ₀ (UInt256.ofNat ↑evmState.executionEnv.codeOwner) μ₁ μ₂ evmState := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.1
+          let hcallgas_lt :
+              Ccallgas (AccountAddress.ofUInt256 μ₁) evmState.executionEnv.codeOwner μ₂ μ₀
+                evmState.accountMap evmState.toMachineState evmState.substate < gasCost := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.2
+          let callResult ←
+            call gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.codeOwner) (.ofNat evmState.executionEnv.codeOwner) μ₁ μ₂ μ₂ μ₃ μ₄ μ₅ μ₆ evmState.executionEnv.perm evmState
+              hcallterm
+              (by simpa [AccountAddress.ofUInt256_ofNat] using hcallgas_lt)
+          let μ'ₛ := stack.push callResult.x -- μ′s[0] ≡ x
+          let evmState' := callResult.state.replaceStackAndIncrPC μ'ₛ
+          .ok
+            { state := evmState'
+              gas_le := by
+                intro hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_le hle
+              gas_lt := by
+                intro hpos hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_lt hpos hle
+            }
+        | _ => .error .StackUnderflow
       | .DELEGATECALL =>
         do
         -- Names are from the YP, these are:
@@ -400,12 +1484,40 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         -- μ₄ - inSize
         -- μ₅ - outOffsize
         -- μ₆ - outSize
-        let (stack, μ₀, μ₁, /-μ₂,-/ μ₃, μ₄, μ₅, μ₆) ← evmState.stack.pop6
-        let (x, state') ←
-          call f gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.source) (.ofNat evmState.executionEnv.codeOwner) μ₁ ⟨0⟩ evmState.executionEnv.weiValue μ₃ μ₄ μ₅ μ₆ evmState.executionEnv.perm evmState
-        let μ'ₛ := stack.push x -- μ′s[0] ≡ x
-        let evmState' := state'.replaceStackAndIncrPC μ'ₛ
-        .ok evmState'
+        match hstack : evmState.stack with
+        | μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: (stack : Stack UInt256) =>
+          let hcallterm : call_termination μ₀ (UInt256.ofNat ↑evmState.executionEnv.codeOwner) μ₁ { val := 0 } evmState := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.1
+          let hcallgas_lt :
+              Ccallgas (AccountAddress.ofUInt256 μ₁) evmState.executionEnv.codeOwner { val := 0 } μ₀
+                evmState.accountMap evmState.toMachineState evmState.substate < gasCost := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.2
+          let callResult ←
+            call gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.source) (.ofNat evmState.executionEnv.codeOwner) μ₁ ⟨0⟩ evmState.executionEnv.weiValue μ₃ μ₄ μ₅ μ₆ evmState.executionEnv.perm evmState
+              hcallterm
+              (by simpa [AccountAddress.ofUInt256_ofNat] using hcallgas_lt)
+          let μ'ₛ := stack.push callResult.x -- μ′s[0] ≡ x
+          let evmState' := callResult.state.replaceStackAndIncrPC μ'ₛ
+          .ok
+            { state := evmState'
+              gas_le := by
+                intro hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_le hle
+              gas_lt := by
+                intro hpos hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_lt hpos hle
+            }
+        | _ => .error .StackUnderflow
       | .STATICCALL =>
         do
         -- Names are from the YP, these are:
@@ -416,74 +1528,99 @@ def step (fuel : ℕ) (gasCost : ℕ) (instr : Option (Operation .EVM × Option 
         -- μ₄ - inSize
         -- μ₅ - outOffsize
         -- μ₆ - outSize
-        let (stack, μ₀, μ₁, /- μ₂, -/ μ₃, μ₄, μ₅, μ₆) ← evmState.stack.pop6
-        let (x, state') ←
-          call f gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.codeOwner) μ₁ μ₁ ⟨0⟩ ⟨0⟩ μ₃ μ₄ μ₅ μ₆ false evmState
-        let μ'ₛ := stack.push x -- μ′s[0] ≡ x
-        let evmState' := state'.replaceStackAndIncrPC μ'ₛ
-        .ok evmState'
-      | instr => EvmYul.step instr arg {evmState with gasAvailable := evmState.gasAvailable - UInt256.ofNat gasCost}
-termination_by fuel
+
+        match hstack : evmState.stack with
+        | μ₀ :: μ₁ :: μ₂ :: μ₃ :: μ₄ :: μ₅ :: μ₆ :: (stack : Stack UInt256) =>
+          let hcallterm : call_termination μ₀ μ₁ μ₁ { val := 0 } evmState := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.1
+          let hcallgas_lt :
+              Ccallgas (AccountAddress.ofUInt256 μ₁) (AccountAddress.ofUInt256 μ₁) { val := 0 } μ₀
+                evmState.accountMap evmState.toMachineState evmState.substate < gasCost := by
+            simp [step_termination] at hterm
+            simp [evmState] at *
+            rw [hstack] at hterm
+            simp [*] at hterm
+            exact hterm.2
+          let callResult ←
+            call gasCost evmState.executionEnv.blobVersionedHashes μ₀ (.ofNat evmState.executionEnv.codeOwner) μ₁ μ₁ ⟨0⟩ ⟨0⟩ μ₃ μ₄ μ₅ μ₆ false evmState hcallterm hcallgas_lt
+          let μ'ₛ := stack.push callResult.x -- μ′s[0] ≡ x
+          let evmState' := callResult.state.replaceStackAndIncrPC μ'ₛ
+          .ok
+            { state := evmState'
+              gas_le := by
+                intro hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_le hle
+              gas_lt := by
+                intro hpos hle
+                simpa [EVM.State.replaceStackAndIncrPC, EVM.State.incrPC] using
+                  callResult.gas_lt hpos hle
+            }
+        | _ => .error .StackUnderflow
+      | .StopArith op =>
+        generic_step_result_of_charged_from_exec gasCost (.StopArith op) arg evmStateBase evmState (by simp)
+      | .CompBit op =>
+        generic_step_result_of_charged_from_exec gasCost (.CompBit op) arg evmStateBase evmState (by simp)
+      | .Keccak op =>
+        generic_step_result_of_charged_from_exec gasCost (.Keccak op) arg evmStateBase evmState (by simp)
+      | .Env op =>
+        generic_step_result_of_charged_from_exec gasCost (.Env op) arg evmStateBase evmState (by simp)
+      | .Block op =>
+        generic_step_result_of_charged_from_exec gasCost (.Block op) arg evmStateBase evmState (by simp)
+      | .StackMemFlow op =>
+        generic_step_result_of_charged_from_exec gasCost (.StackMemFlow op) arg evmStateBase evmState (by simp)
+      | .Push op =>
+        generic_step_result_of_charged_from_exec gasCost (.Push op) arg evmStateBase evmState (by simp)
+      | .Dup op =>
+        generic_step_result_of_charged_from_exec gasCost (.Dup op) arg evmStateBase evmState (by simp)
+      | .Exchange op =>
+        generic_step_result_of_charged_from_exec gasCost (.Exchange op) arg evmStateBase evmState (by simp)
+      | .Log op =>
+        generic_step_result_of_charged_from_exec gasCost (.Log op) arg evmStateBase evmState (by simp)
+      | .System .RETURN =>
+        generic_step_result_of_charged_from_exec gasCost Operation.RETURN arg evmStateBase evmState (by simp)
+      | .System .REVERT =>
+        generic_step_result_of_charged_from_exec gasCost Operation.REVERT arg evmStateBase evmState (by simp)
+      | .System .INVALID =>
+        generic_step_result_of_charged_from_exec gasCost Operation.INVALID arg evmStateBase evmState (by simp)
+      | .System .SELFDESTRUCT =>
+        generic_step_result_of_charged_from_exec gasCost (.System .SELFDESTRUCT) arg evmStateBase evmState (by simp)
+      termination_by (evmState.gasAvailable, 1)
+      decreasing_by
+        · 
+          apply Prod.Lex.left
+          apply sizeOf_UInt256_le
+          simp [step_termination] at hterm; assumption
+        · 
+          apply Prod.Lex.left
+          apply sizeOf_UInt256_le
+          simp [step_termination] at hterm; assumption
+        · 
+          apply Prod.Lex.right
+          simp
+        · 
+          apply Prod.Lex.right
+          simp
+        · 
+          apply Prod.Lex.right
+          simp
+        · 
+          apply Prod.Lex.right
+          simp
 
 /--
   Iterative progression of `step`
 -/
-def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
-  : Except EVM.ExecutionException (ExecutionResult State)
+def XWithGasBound (validJumps : Array UInt256) (gasBound : UInt256) (evmState : State)
+  (hgasBound : evmState.gasAvailable ≤ gasBound)
+  : Except EVM.ExecutionException (XResult gasBound)
 := do
-  match fuel with
-    | 0 => .error .OutOfFuel
-    | .succ f =>
       let I_b := evmState.toState.executionEnv.code
-      let instr@(w, _) := decode I_b evmState.pc |>.getD (.STOP, .none)
-      -- (159)
-      let W (w : Operation .EVM) (s : Stack UInt256) : Bool :=
-        w ∈ [.CREATE, .CREATE2, .SSTORE, .SELFDESTRUCT, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4, .TSTORE] ∨
-        (w = .CALL ∧ s[2]? ≠ some ⟨0⟩)
-      -- Exceptional halting (158)
-      let Z (evmState : State) : Except EVM.ExecutionException (State × ℕ) := do
-        if δ w = none then
-          .error .InvalidInstruction
-
-        if evmState.stack.length < (δ w).getD 0 then
-          .error .StackUnderflow
-
-        let cost₁ := memoryExpansionCost evmState w
-        if evmState.gasAvailable.toNat < cost₁ then
-          .error .OutOfGass
-        let gasAvailable := evmState.gasAvailable - .ofNat cost₁
-        let evmState := { evmState with gasAvailable := gasAvailable}
-        let cost₂ := C' evmState w
-
-        if evmState.gasAvailable.toNat < cost₂ then
-          .error .OutOfGass
-
-        let invalidJump := notIn evmState.stack[0]? validJumps
-
-        if w = .JUMP ∧ invalidJump then
-          .error .BadJumpDestination
-
-        if w = .JUMPI ∧ (evmState.stack[1]? ≠ some ⟨0⟩) ∧ invalidJump then
-          .error .BadJumpDestination
-
-        if w = .RETURNDATACOPY ∧ (evmState.stack.getD 1 ⟨0⟩).toNat + (evmState.stack.getD 2 ⟨0⟩).toNat > evmState.returnData.size then
-          .error .InvalidMemoryAccess
-
-        if evmState.stack.length - (δ w).getD 0 + (α w).getD 0 > 1024 then
-          .error .StackOverflow
-
-        if (¬ evmState.executionEnv.perm) ∧ W w evmState.stack then
-          .error .StaticModeViolation
-
-        if (w = .SSTORE) ∧ evmState.gasAvailable.toNat ≤ GasConstants.Gcallstipend then
-          .error .OutOfGass
-
-        if
-          w.isCreate ∧ evmState.stack.getD 2 ⟨0⟩ > ⟨49152⟩
-        then
-          .error .OutOfGass
-
-        pure (evmState, cost₂)
+      let (w, args) := decode I_b evmState.pc |>.getD (.STOP, .none)
       let H (μ : MachineState) (w : Operation .EVM) : Option ByteArray :=
         if w ∈ [.RETURN, .REVERT] then
           some <| μ.H_return
@@ -491,18 +1628,58 @@ def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
           if w ∈ [.STOP, .SELFDESTRUCT] then
             some .empty
           else none
-      match Z evmState with
+      match hz : X_Z validJumps w evmState with
         | .error e =>
           .error e
-        | some (evmState, cost₂) =>
-          let evmState' ← step f cost₂ instr evmState
+        | some (evmState', cost₂) =>
+          have hzg_le := X_Z_state_gas_le hz
+          let hstepterm : step_termination cost₂ w evmState' := by
+            exact X_Z_step_termination hz
+          let stepResult ← step cost₂ w args evmState' hstepterm
+          let evmState'' := stepResult.state
+          have hcostle : cost₂ ≤ evmState'.gasAvailable.toNat := X_Z_cost_le hz
+          have hstep_le : evmState''.gasAvailable ≤ evmState'.gasAvailable := stepResult.gas_le hcostle
           -- Maybe we should restructure in a way such that it is more meaningful to compute
           -- gas independently, but the model has not been set up thusly and it seems
           -- that neither really was the YP.
           -- Similarly, we cannot reach a situation in which the stack elements are not available
           -- on the stack because this is guarded above. As such, `C` can be pure here.
-          match H evmState'.toMachineState w with -- The YP does this in a weird way.
-            | none => X f validJumps evmState'
+          match hH : H evmState''.toMachineState w with -- The YP does this in a weird way.
+            | none =>
+              have hcont : ContinuesAfterXStep w := by
+                unfold ContinuesAfterXStep
+                constructor
+                · intro hδ
+                  unfold X_Z at hz
+                  simp [hδ] at hz
+                · intro hw
+                  simp at hw
+                  rcases hw with hw | hw | hw | hw
+                  · subst w
+                    simp [H] at hH
+                  · subst w
+                    simp [H] at hH
+                  · subst w
+                    simp [H] at hH
+                  · subst w
+                    simp [H] at hH
+              have hcost_pos : 0 < cost₂ := X_Z_cost_pos_of_continues hz hcont
+              have hstep_lt : evmState''.gasAvailable < evmState'.gasAvailable :=
+                stepResult.gas_lt hcost_pos hcostle
+              have hdecr :
+                  Prod.Lex (fun a b : UInt256 => sizeOf a < sizeOf b) (fun a b : Nat => a < b)
+                    (evmState''.gasAvailable, 2) (evmState.gasAvailable, 2) := by
+                by_cases hz_eq : evmState'.gasAvailable = evmState.gasAvailable
+                · apply Prod.Lex.left
+                  apply sizeOf_UInt256_le
+                  simpa [hz_eq] using hstep_lt
+                · have h_lt : evmState'.gasAvailable < evmState.gasAvailable := by
+                    apply UInt256.lt_of_le_of_ne' hzg_le hz_eq
+                  apply Prod.Lex.left
+                  apply sizeOf_UInt256_le
+                  exact UInt256.le_lt_trans' hstep_le h_lt
+              XWithGasBound validJumps gasBound evmState''
+                (UInt256.le_trans' (UInt256.le_trans' hstep_le hzg_le) hgasBound)
             | some o =>
               if w == .REVERT then
                 /-
@@ -511,22 +1688,32 @@ def X (fuel : ℕ) (validJumps : Array UInt256) (evmState : State)
                   EthereumTests/BlockchainTests/GeneralStateTests/stReturnDataTest/returndatacopy_after_revert_in_staticcall.json
                   And the EEL spec does so too.
                 -/
-                .ok <| .revert evmState'.gasAvailable o
+                .ok
+                  { result := .revert evmState''.gasAvailable o
+                    gas_le := by
+                      exact UInt256.le_trans' (UInt256.le_trans' hstep_le hzg_le) hgasBound
+                  }
               else
-                .ok <| .success evmState' o
-termination_by fuel
- where
-  belongs (o : Option UInt256) (l : Array UInt256) : Bool :=
-    match o with
-      | none => false
-      | some n => l.contains n
-  notIn (o : Option UInt256) (l : Array UInt256) : Bool := not (belongs o l)
+                .ok
+                  { result := .success evmState'' o
+                    gas_le := by
+                      exact UInt256.le_trans' (UInt256.le_trans' hstep_le hzg_le) hgasBound
+                  }
+                termination_by (evmState.gasAvailable, 2)
+                decreasing_by
+                  · by_cases hz_eq : evmState'.gasAvailable = evmState.gasAvailable
+                    · rw [hz_eq]
+                      apply Prod.Lex.right
+                      simp
+                    · apply Prod.Lex.left
+                      apply sizeOf_UInt256_le
+                      exact UInt256.lt_of_le_of_ne' hzg_le hz_eq
+                  · assumption
 
 /--
   The code execution function
 -/
-def Ξ -- Type `Ξ` using `\GX` or `\Xi`
-  (fuel : ℕ)
+def ΞWithGas -- Type `Ξ` using `\GX` or `\Xi`
   (createdAccounts : Batteries.RBSet AccountAddress compare)
   (genesisBlockHeader : BlockHeader)
   (blocks : ProcessedBlocks)
@@ -538,11 +1725,8 @@ def Ξ -- Type `Ξ` using `\GX` or `\Xi`
     :
   Except
     EVM.ExecutionException
-    (ExecutionResult (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate))
+    (XiResult g)
 := do
-  match fuel with
-    | 0 => .error .OutOfFuel
-    | .succ f =>
       let defState : EVM.State := default
       let freshEvmState : EVM.State :=
         { defState with
@@ -555,16 +1739,27 @@ def Ξ -- Type `Ξ` using `\GX` or `\Xi`
             blocks := blocks
             genesisBlockHeader := genesisBlockHeader
         }
-      let result ← X f (D_J I.code ⟨0⟩) freshEvmState
+      let result ← XWithGasBound (D_J I.code ⟨0⟩) g freshEvmState (by simp [freshEvmState])
       match result with
-        | .success evmState' o =>
+        | ⟨.success evmState' o, hgas⟩ =>
           let finalGas := evmState'.gasAvailable
-          .ok (ExecutionResult.success (evmState'.createdAccounts, evmState'.accountMap, finalGas, evmState'.substate) o)
-        | .revert g' o => .ok (ExecutionResult.revert g' o)
-termination_by fuel
+          .ok
+            { result := ExecutionResult.success
+                (evmState'.createdAccounts, evmState'.accountMap, finalGas, evmState'.substate) o
+              gas_le := by
+                simpa [ExecutionResult.xiGasAvailable, ExecutionResult.gasAvailable, finalGas,
+                  freshEvmState] using hgas
+            }
+        | ⟨.revert g' o, hgas⟩ =>
+          .ok
+            { result := ExecutionResult.revert g' o
+              gas_le := by
+                simpa [ExecutionResult.xiGasAvailable, ExecutionResult.gasAvailable,
+                  freshEvmState] using hgas
+            }
+        termination_by (g, 3)
 
-def Lambda
-  (fuel : ℕ)
+def LambdaWithGas
   (blobVersionedHashes : List ByteArray)
   (createdAccounts : Batteries.RBSet AccountAddress compare) -- needed for EIP-6780
   (genesisBlockHeader : BlockHeader)
@@ -584,19 +1779,9 @@ def Lambda
   (w : Bool)             -- permission to make modifications to the state
   :
   Except EVM.ExecutionException
-    ( AccountAddress
-    × Batteries.RBSet AccountAddress compare
-    × AccountMap .EVM
-    × UInt256
-    × Substate
-    × Bool
-    × ByteArray
-    )
+    (LambdaResult g)
 :=
-  match fuel with
-    | 0 => .error .OutOfFuel
-    | .succ f => do
-
+  do
   -- EIP-3860 (includes EIP-170)
   -- https://eips.ethereum.org/EIPS/eip-3860
 
@@ -655,13 +1840,33 @@ def Lambda
     , perm      := w
     , blobVersionedHashes := blobVersionedHashes
     }
-  match Ξ f createdAccounts genesisBlockHeader blocks σStar σ₀ g AStar exEnv with
+  match ΞWithGas createdAccounts genesisBlockHeader blocks σStar σ₀ g AStar exEnv with
     | .error e =>
       if e == .OutOfFuel then throw .OutOfFuel
-      .ok (a, createdAccounts, σ, ⟨0⟩, AStar, false, .empty)
-    | .ok (.revert g' o) =>
-      .ok (a, createdAccounts, σ, g', AStar, false, o)
-    | .ok (.success (createdAccounts', σStarStar, gStarStar, AStarStar) returnedData) =>
+      .ok
+        { address := a
+          createdAccounts := createdAccounts
+          accountMap := σ
+          gas := ⟨0⟩
+          substate := AStar
+          success := false
+          output := .empty
+          gas_le := by
+            change (0 : Fin UInt256.size) ≤ g.val
+            exact Nat.zero_le _
+        }
+    | .ok ⟨.revert g' o, hgas⟩ =>
+      .ok
+        { address := a
+          createdAccounts := createdAccounts
+          accountMap := σ
+          gas := g'
+          substate := AStar
+          success := false
+          output := o
+          gas_le := hgas
+        }
+    | .ok ⟨.success (createdAccounts', σStarStar, gStarStar, AStarStar) returnedData, hgas⟩ =>
       -- The code-deposit cost (113)
       let c := GasConstants.Gcodedeposit * returnedData.size
 
@@ -688,8 +1893,21 @@ def Lambda
       let A' := if F then AStar else AStarStar
       -- (117)
       let z := not F
-      .ok (a, createdAccounts', σ', .ofNat g', A', z, .empty) -- (93)
-termination_by fuel
+      .ok
+        { address := a
+          createdAccounts := createdAccounts'
+          accountMap := σ'
+          gas := .ofNat g'
+          substate := A'
+          success := z
+          output := .empty
+          gas_le := by
+            have hg'le : g' ≤ gStarStar.toNat := by
+              unfold g'
+              split <;> omega
+            exact le_trans (UInt256.ofNat_le_of_le_toNat hg'le) hgas
+        } -- (93)
+      termination_by (g, 4)
  where
   L_A (s : AccountAddress) (n : UInt256) (ζ : Option ByteArray) (i : ByteArray) :
     Option ByteArray
@@ -719,7 +1937,7 @@ Message cal
 NB - This is implemented using the 'boolean' fragment with ==, <=, ||, etc.
      The 'prop' version will come next once we have the comutable one.
 -/
-def Θ (fuel : Nat)
+def ΘWithGas
       (blobVersionedHashes : List ByteArray)
       (createdAccounts : Batteries.RBSet AccountAddress compare)
       (genesisBlockHeader : BlockHeader)
@@ -740,11 +1958,9 @@ def Θ (fuel : Nat)
       (H : BlockHeader)
       (w  : Bool)
         :
-      Except EVM.ExecutionException (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate × Bool × ByteArray)
+      Except EVM.ExecutionException (ThetaResult g)
 :=
-  match fuel with
-    | 0 => .error .OutOfFuel
-    | fuel + 1 => do
+  do
 
   -- (124) (125) (126)
   let σ'₁ :=
@@ -785,30 +2001,63 @@ def Θ (fuel : Nat)
 
   -- Equation (131)
   -- Note that the `c` used here is the actual code, not the address. TODO - Handle precompiled contracts.
-  let (createdAccounts, z, σ'', g', A'', out) ←
+  let θ ←
     match c with
       | ToExecute.Precompiled p =>
         match p with
-          | 1  => .ok <| (∅, Ξ_ECREC σ₁ g A I)
-          | 2  => .ok <| (∅, Ξ_SHA256 σ₁ g A I)
-          | 3  => .ok <| (∅, Ξ_RIP160 σ₁ g A I)
-          | 4  => .ok <| (∅, Ξ_ID σ₁ g A I)
-          | 5  => .ok <| (∅, Ξ_EXPMOD σ₁ g A I)
-          | 6  => .ok <| (∅, Ξ_BN_ADD σ₁ g A I)
-          | 7  => .ok <| (∅, Ξ_BN_MUL σ₁ g A I)
-          | 8  => .ok <| (∅, Ξ_SNARKV σ₁ g A I)
-          | 9  => .ok <| (∅, Ξ_BLAKE2_F σ₁ g A I)
-          | 10 => .ok <| (∅, Ξ_PointEval σ₁ g A I)
-          | _ => default
+          | 1  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_ECREC σ₁ g A I) (precompile_ECREC_gas_le σ₁ g A I)
+          | 2  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_SHA256 σ₁ g A I) (precompile_SHA256_gas_le σ₁ g A I)
+          | 3  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_RIP160 σ₁ g A I) (precompile_RIP160_gas_le σ₁ g A I)
+          | 4  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_ID σ₁ g A I) (precompile_ID_gas_le σ₁ g A I)
+          | 5  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_EXPMOD σ₁ g A I) (precompile_EXPMOD_gas_le σ₁ g A I)
+          | 6  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_BN_ADD σ₁ g A I) (precompile_BN_ADD_gas_le σ₁ g A I)
+          | 7  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_BN_MUL σ₁ g A I) (precompile_BN_MUL_gas_le σ₁ g A I)
+          | 8  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_SNARKV σ₁ g A I) (precompile_SNARKV_gas_le σ₁ g A I)
+          | 9  => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_BLAKE2_F σ₁ g A I) (precompile_BLAKE2_F_gas_le σ₁ g A I)
+          | 10 => .ok <| ThetaResult.ofPrecompile g ∅ (Ξ_PointEval σ₁ g A I) (precompile_PointEval_gas_le σ₁ g A I)
+          | _ => .error .InvalidInstruction
       | ToExecute.Code _ =>
-        match Ξ fuel createdAccounts genesisBlockHeader blocks σ₁ σ₀ g A I with
+        match ΞWithGas createdAccounts genesisBlockHeader blocks σ₁ σ₀ g A I with
           | .error e =>
             if e == .OutOfFuel then throw .OutOfFuel
-            pure (createdAccounts, false, σ, ⟨0⟩, A, .empty)
-          | .ok (.revert g' o) =>
-            pure (createdAccounts, false, σ, g', A, o)
-          | .ok (.success (a, b, c, d) o) =>
-            pure (a, true, b, c, d, o)
+            pure
+              { createdAccounts := createdAccounts
+                accountMap := σ
+                gas := ⟨0⟩
+                substate := A
+                success := false
+                output := .empty
+                gas_le := by
+                  change (0 : Fin UInt256.size) ≤ g.val
+                  exact Nat.zero_le _
+              }
+          | .ok ⟨.revert g' o, hgas⟩ =>
+            pure
+              { createdAccounts := createdAccounts
+                accountMap := σ
+                gas := g'
+                substate := A
+                success := false
+                output := o
+                gas_le := hgas
+              }
+          | .ok ⟨.success (a, b, c, d) o, hgas⟩ =>
+            pure
+              { createdAccounts := a
+                accountMap := b
+                gas := c
+                substate := d
+                success := true
+                output := o
+                gas_le := hgas
+              }
+
+  let createdAccounts := θ.createdAccounts
+  let z := θ.success
+  let σ'' := θ.accountMap
+  let g' := θ.gas
+  let A'' := θ.substate
+  let out := θ.output
 
   -- Equation (127)
   let σ' := if σ'' == ∅ then σ else σ''
@@ -817,16 +2066,122 @@ def Θ (fuel : Nat)
   let A' := if σ'' == ∅ then A else A''
 
   -- Equation (119)
-  .ok (createdAccounts, σ', g', A', z, out)
-termination_by fuel
+  .ok
+    { createdAccounts := createdAccounts
+      accountMap := σ'
+      gas := g'
+      substate := A'
+      success := z
+      output := out
+      gas_le := by
+        simpa [g'] using θ.gas_le
+    }
+  termination_by (g, 4)
 
 end
+
+def XWithGas (validJumps : Array UInt256) (evmState : State)
+  : Except EVM.ExecutionException (XResult evmState.gasAvailable)
+:=
+  XWithGasBound validJumps evmState.gasAvailable evmState (by rfl)
+
+def X (validJumps : Array UInt256) (evmState : State)
+  : Except EVM.ExecutionException (ExecutionResult State)
+:= do
+  let result ← XWithGas validJumps evmState
+  pure result.result
+
+def Ξ -- Type `Ξ` using `\GX` or `\Xi`
+  (createdAccounts : Batteries.RBSet AccountAddress compare)
+  (genesisBlockHeader : BlockHeader)
+  (blocks : ProcessedBlocks)
+  (σ : AccountMap .EVM)
+  (σ₀ : AccountMap .EVM)
+  (g : UInt256)
+  (A : Substate)
+  (I : ExecutionEnv .EVM)
+    :
+  Except
+    EVM.ExecutionException
+    (ExecutionResult (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate))
+:= do
+  let result ← ΞWithGas createdAccounts genesisBlockHeader blocks σ σ₀ g A I
+  pure result.result
+
+def Lambda
+  (blobVersionedHashes : List ByteArray)
+  (createdAccounts : Batteries.RBSet AccountAddress compare)
+  (genesisBlockHeader : BlockHeader)
+  (blocks : ProcessedBlocks)
+  (σ : AccountMap .EVM)
+  (σ₀ : AccountMap .EVM)
+  (A : Substate)
+  (s : AccountAddress)
+  (o : AccountAddress)
+  (g : UInt256)
+  (p : UInt256)
+  (v : UInt256)
+  (i : ByteArray)
+  (e : UInt256)
+  (ζ : Option ByteArray)
+  (H : BlockHeader)
+  (w : Bool)
+  :
+  Except EVM.ExecutionException
+    (AccountAddress × Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate × Bool × ByteArray)
+:= do
+  let result ←
+    LambdaWithGas blobVersionedHashes createdAccounts genesisBlockHeader blocks σ σ₀ A s o g p v i e ζ H w
+  pure
+    ( result.address
+    , result.createdAccounts
+    , result.accountMap
+    , result.gas
+    , result.substate
+    , result.success
+    , result.output
+    )
+
+def Θ
+  (blobVersionedHashes : List ByteArray)
+  (createdAccounts : Batteries.RBSet AccountAddress compare)
+  (genesisBlockHeader : BlockHeader)
+  (blocks : ProcessedBlocks)
+  (σ  : AccountMap .EVM)
+  (σ₀  : AccountMap .EVM)
+  (A  : Substate)
+  (s  : AccountAddress)
+  (o  : AccountAddress)
+  (r  : AccountAddress)
+  (c  : ToExecute .EVM)
+  (g  : UInt256)
+  (p  : UInt256)
+  (v  : UInt256)
+  (v' : UInt256)
+  (d  : ByteArray)
+  (e  : Nat)
+  (H : BlockHeader)
+  (w  : Bool)
+  :
+  Except EVM.ExecutionException
+    (Batteries.RBSet AccountAddress compare × AccountMap .EVM × UInt256 × Substate × Bool × ByteArray)
+:= do
+  let result ←
+    ΘWithGas blobVersionedHashes createdAccounts genesisBlockHeader blocks σ σ₀ A s o r c g p v v' d e H w
+  pure
+    ( result.createdAccounts
+    , result.accountMap
+    , result.gas
+    , result.substate
+    , result.success
+    , result.output
+    )
 
 open Batteries (RBMap RBSet)
 
 
 -- Type Υ using \Upsilon or \GU
-def Υ (fuel : ℕ)
+def Υ
   (σ : AccountMap .EVM)
   (H_f : ℕ)
   (H : BlockHeader)
@@ -886,7 +2241,7 @@ def Υ (fuel : ℕ)
     match T.base.recipient with
       | none => do
         match
-          Lambda fuel
+          Lambda
             T.blobVersionedHashes
             createdAccounts
             genesisBlockHeader
@@ -910,7 +2265,7 @@ def Υ (fuel : ℕ)
       | some t =>
         -- Proposition (71) suggests the recipient can be inexistent
         match
-          Θ fuel
+          Θ
             T.blobVersionedHashes
             createdAccounts
             genesisBlockHeader
@@ -931,7 +2286,7 @@ def Υ (fuel : ℕ)
             H
             true
         with
-          | .ok (_, σ_P, g',  A, z, _) => pure (σ_P, g', A, z)
+          | .ok (_, σ_P, g', A, z, _) => pure (σ_P, g', A, z)
           | .error e => .error <| .ExecutionException e
   -- The amount to be refunded (82)
   let gStar := g' + min ((T.base.gasLimit - g') / ⟨5⟩) A.refundBalance

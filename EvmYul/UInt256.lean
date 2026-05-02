@@ -24,6 +24,21 @@ structure UInt256 where
   val : Fin UInt256.size
   deriving BEq, Ord
 
+instance : LawfulBEq UInt256 where
+  eq_of_beq := by
+    intro a b h
+    cases a with | mk av =>
+    cases b with | mk bv =>
+    change (av == bv) = true at h
+    have hv : av = bv := beq_iff_eq.mp h
+    cases hv
+    rfl
+  rfl := by
+    intro a
+    cases a with | mk av =>
+    change (av == av) = true
+    exact beq_iff_eq.mpr rfl
+
 instance : ToString UInt256 where
   toString a := toString a.val
 
@@ -33,6 +48,20 @@ def ofNat (n : ℕ) : UInt256 := Id.run do
   ⟨Fin.ofNat _ n⟩
 
 def toNat (u : UInt256) : ℕ := u.val.val
+
+theorem ofNat_toNat : ∀ (n : UInt256), ofNat (n.toNat) = n := by
+  intros
+  simp [ofNat, toNat, Id.run]
+
+theorem toNat_ofNat : ∀ (n : Nat), n < size → (UInt256.ofNat n).toNat = n := by
+  intros
+  simp [ofNat, toNat, Id.run]
+  apply Nat.mod_eq_of_lt; assumption
+
+theorem toNat_ofNat_le : ∀ (n : Nat), (UInt256.ofNat n).toNat ≤ n := by
+  intros
+  simp [ofNat, toNat, Id.run]
+  apply Nat.mod_le
 
 instance : Repr UInt256 where
   reprPrec n _ := repr n.toNat

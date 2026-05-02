@@ -139,6 +139,32 @@ def expModAux (m : ℕ) (a : ℕ) (c : ℕ) : ℕ → ℕ
 
 def expMod (m : ℕ) (b : UInt256) (n : ℕ) : ℕ := expModAux m 1 b.toNat n
 
+def Ξ_EXPMOD_gasRequired (I : ExecutionEnv .EVM) : ℕ :=
+  let data := I.calldata
+  let base_length := nat_of_slice data 0 32
+  let exp_length := nat_of_slice data 32 32
+  let modulus_length := nat_of_slice data 64 32
+  let exp := λ () ↦ nat_of_slice data (96 + base_length) exp_length
+  let multiplication_complexity x y := ((max x y + 7) / 8) ^ 2
+  let adjusted_exp_length :=
+    if exp_length ≤ 32 && exp () == 0 then
+      0
+    else
+      if exp_length ≤ 32 then
+        Nat.log 2 (exp ())
+      else
+        let length_part := 8 * (exp_length - 32)
+        let bits_part :=
+          let exp_head := nat_of_slice data (96 + base_length) 32
+          if 32 < exp_length ∧ exp_head != 0 then
+            Nat.log 2 exp_head
+          else
+            0
+        length_part + bits_part
+  let iterations := max adjusted_exp_length 1
+  let G_quaddivisor := 3
+  max 200 (multiplication_complexity base_length modulus_length * iterations / G_quaddivisor)
+
 def Ξ_EXPMOD
   (σ : AccountMap .EVM)
   (g : UInt256)
@@ -151,31 +177,8 @@ def Ξ_EXPMOD
   let base_length := nat_of_slice data 0 32
   let exp_length := nat_of_slice data 32 32
   let modulus_length := nat_of_slice data 64 32
-  -- Pseudo laziness
-  -- We don't want to call `nat_of_slice` unless we need it
-  let exp := λ () ↦ nat_of_slice data (96 + base_length) exp_length
 
-  let gᵣ :=
-    let multiplication_complexity x y := ((max x y + 7) / 8) ^ 2
-    let adjusted_exp_length :=
-      if exp_length ≤ 32 && exp () == 0 then
-        0
-      else
-        if exp_length ≤ 32 then
-          Nat.log 2 (exp ())
-        else
-          let length_part := 8 * (exp_length - 32)
-          let bits_part :=
-            let exp_head := nat_of_slice data (96 + base_length) 32
-            if 32 < exp_length ∧ exp_head != 0 then
-              Nat.log 2 exp_head
-            else
-              0
-          length_part + bits_part
-    let iterations := max adjusted_exp_length 1
-    let G_quaddivisor := 3
-
-    max 200 (multiplication_complexity base_length modulus_length * iterations / G_quaddivisor)
+  let gᵣ := Ξ_EXPMOD_gasRequired I
 
   if g.toNat < gᵣ then
     (false, ∅, ⟨0⟩, A, .empty)

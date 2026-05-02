@@ -571,6 +571,55 @@ def step {τ : OperationType} (op : Operation τ) (arg : Option (UInt256 × Nat)
     | .Yul, .POP => λ yulState _ ↦ .ok (yulState, .none) -- POP is a no-op for Yul as it discards the value only as a hint to the compiler.
     | .Yul, _ => λ _ _ ↦ default
 
+set_option linter.unnecessarySimpa false in
+set_option linter.unusedSimpArgs false in
+theorem evm_step_preserves_gas_of_not_call_create {op : Operation OperationType.EVM}
+    {arg : Option (UInt256 × Nat)} {s s' : EVM.State}
+    (hop : op ∉ ([Operation.CREATE, Operation.CREATE2, Operation.CALL, Operation.CALLCODE,
+      Operation.DELEGATECALL, Operation.STATICCALL] : List (Operation OperationType.EVM)))
+    (h : (step (τ := OperationType.EVM) op arg) s = .ok s') :
+    s'.gasAvailable = s.gasAvailable := by
+  cases op <;> rename_i a <;> try cases a
+  all_goals
+    first
+    | (exfalso; simpa using hop)
+    | (
+      unfold step at h
+      try dsimp at h
+      try unfold dispatchInvalid at h
+      try unfold dispatchUnary at h
+      try unfold dispatchBinary at h
+      try unfold dispatchTernary at h
+      try unfold dispatchQuartiary at h
+      try unfold dispatchExecutionEnvOp at h
+      try unfold dispatchUnaryExecutionEnvOp at h
+      try unfold dispatchMachineStateOp at h
+      try unfold dispatchUnaryStateOp at h
+      try unfold dispatchTernaryCopyOp at h
+      try unfold dispatchQuaternaryCopyOp at h
+      try unfold dispatchBinaryMachineStateOp at h
+      try unfold dispatchTernaryMachineStateOp at h
+      try unfold dispatchBinaryMachineStateOp' at h
+      try unfold dispatchBinaryStateOp at h
+      try unfold dispatchStateOp at h
+      try unfold dispatchLog0 at h
+      try unfold dispatchLog1 at h
+      try unfold dispatchLog2 at h
+      try unfold dispatchLog3 at h
+      try unfold dispatchLog4 at h
+      try dsimp at h
+      try simp only [Id.run, EVM.execUnOp, EVM.execBinOp, EVM.execTriOp, EVM.execQuadOp,
+        EVM.executionEnvOp, EVM.unaryExecutionEnvOp, EVM.machineStateOp,
+        EVM.binaryMachineStateOp, EVM.binaryMachineStateOp', EVM.ternaryMachineStateOp,
+        EVM.binaryStateOp, EVM.stateOp, EVM.unaryStateOp, EVM.ternaryCopyOp,
+        EVM.quaternaryCopyOp, EVM.log0Op, EVM.log1Op, EVM.log2Op, EVM.log3Op,
+        EVM.log4Op, EVM.State.replaceStackAndIncrPC, EVM.State.incrPC,
+        dup, swap] at h
+      repeat split at h
+      all_goals try contradiction
+      all_goals try (injection h with hs; subst s'; rfl)
+    )
+
 end Semantics
 
 end EvmYul
