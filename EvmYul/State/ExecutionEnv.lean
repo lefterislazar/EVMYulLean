@@ -27,7 +27,7 @@ structure ExecutionEnv (τ : OperationType) where
   code      : (Yul.Ast.contractCode τ)
   gasPrice  : ℕ
   header    : BlockHeader
-  depth     : ℕ
+  depth     : Fin 1025
   perm      : Bool
   blobVersionedHashes : List ByteArray
   deriving BEq, Inhabited, Repr

@@ -80,7 +80,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
               | .none =>
                 buildContractCallEmptyReturnState s₀ .none ⟨0⟩ -- Insufficient funds: return 0 to indicate error, with empty return data 
               | .some accountMap₁ =>
-                if s₀.executionEnv.depth ≥ 1024
+                if hDepth : s₀.executionEnv.depth.val ≥ 1024
                 then
                   buildContractCallEmptyReturnState s₀ .none ⟨0⟩ -- Reached depth limit: return 0 to indicate error, with empty return data 
                 else
@@ -98,7 +98,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                     codeOwner := address,
                                                     source := s₀.executionEnv.codeOwner,
                                                     weiValue := value
-                                                    depth := s₀.executionEnv.depth + 1
+                                                    depth := ⟨sharedState.executionEnv.depth.val + 1, Nat.succ_lt_succ (Nat.lt_of_not_ge hDepth)⟩
                                                 }
                           let sharedState₁ := { sharedState with
                                                   executionEnv := executionEnv₁,
@@ -174,7 +174,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
             let address := AccountAddress.ofUInt256 address_arg
             let calldata₁ := s₀Static.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
           
-              if s₀Static.toSharedState.executionEnv.depth ≥ 1024
+              if hDepth : s₀Static.toSharedState.executionEnv.depth.val ≥ 1024
               then
                 buildContractCallEmptyReturnState s₀Static .none ⟨0⟩ -- Reached depth limit: return 0 to indicate error, with empty return data 
               else
@@ -192,7 +192,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                   codeOwner := address,
                                                   source := s₀Static.executionEnv.codeOwner,
                                                   weiValue := ⟨0⟩
-                                                  depth := s₀Static.toSharedState.executionEnv.depth + 1
+                                                  depth := ⟨sharedState.executionEnv.depth.val + 1, Nat.succ_lt_succ (Nat.lt_of_not_ge hDepth)⟩
                                               }
                         let sharedState₁ := { sharedState with
                                                 executionEnv := executionEnv₁,
@@ -257,7 +257,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
               | .none =>
                   buildContractCallEmptyReturnState s₀ .none ⟨0⟩ -- Insufficient funds: return 0 to indicate error, with empty return data 
               | .some accountMap₁ =>
-                if s₀.executionEnv.depth ≥ 1024
+                if hDepth : s₀.executionEnv.depth.val ≥ 1024
                 then
                   buildContractCallEmptyReturnState s₀ accountMap₁ ⟨0⟩ -- Reached depth limit: return 0 to indicate error, with empty return data 
                 else
@@ -275,7 +275,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                     codeOwner := s₀.executionEnv.codeOwner,
                                                     source := s₀.executionEnv.codeOwner,
                                                     weiValue := value
-                                                    depth := s₀.executionEnv.depth + 1
+                                                    depth := ⟨sharedState.executionEnv.depth.val + 1, Nat.succ_lt_succ (Nat.lt_of_not_ge hDepth)⟩
                                                 }
                           let sharedState₁ := { sharedState with
                                                   executionEnv := executionEnv₁,
@@ -335,7 +335,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
           | _ :: address_arg :: inOffset :: inSize :: outOffset :: outSize :: _ =>
             let address := AccountAddress.ofUInt256 address_arg
             let calldata₁ := s₀.toMachineState.memory.readWithPadding inOffset.toNat inSize.toNat
-            if s₀.executionEnv.depth ≥ 1024
+            if hDepth : s₀.executionEnv.depth.val ≥ 1024
             then
               buildContractCallEmptyReturnState s₀ .none ⟨0⟩ -- Reached depth limit: return 0 to indicate error, with empty return data 
             else
@@ -351,7 +351,7 @@ def primCall (fuel : ℕ) (s₀ : State) (prim : Operation .Yul) (args : List Li
                                                 calldata := calldata₁,
                                                 code := yulContract.code,
                                                 codeOwner := s₀.executionEnv.codeOwner
-                                                depth := s₀.executionEnv.depth + 1
+                                                depth := ⟨sharedState.executionEnv.depth.val + 1, Nat.succ_lt_succ (Nat.lt_of_not_ge hDepth)⟩
                                             }
                       let sharedState₁ := { sharedState with
                                               executionEnv := executionEnv₁,
